@@ -17,9 +17,13 @@ namespace peloton {
 
     class SIMDRuntime {
     public:
-      static void SIMDAdd(int a[4], int b[4], int c[4]);
-      static void SIMDCmpEq(int a[4], int b[4], int c[4]);
-      static void SIMDFAdd(float a[4], float b[4], float c[4]);
+      static inline void SIMDAdd4(int32_t *a, int32_t *b, int32_t *c);
+      static inline void SIMDSub4(int32_t *a, int32_t *b, int32_t *c);
+      static inline void SIMDCmpEq4(int32_t *a, int32_t *b, int32_t *c);
+      static inline void SIMDCmpLt4(int32_t *a, int32_t *b, int32_t *c);
+      static inline void SIMDCmpGt4(int32_t *a, int32_t *b, int32_t *c);
+      static inline void SIMDFAdd4(float *a, float *b, float *c);
+      static inline void SIMDFSub4(float *a, float *b, float *c);
     };
 
   }

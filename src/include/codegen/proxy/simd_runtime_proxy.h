@@ -18,9 +18,13 @@ namespace peloton {
   namespace codegen {
 
     PROXY(SIMDRuntime) {
-      DECLARE_METHOD(SIMDAdd);
-      DECLARE_METHOD(SIMDCmpEq);
-      DECLARE_METHOD(SIMDFAdd);
+      DECLARE_METHOD(SIMDAdd4);
+      DECLARE_METHOD(SIMDSub4);
+      DECLARE_METHOD(SIMDCmpEq4);
+      DECLARE_METHOD(SIMDCmpLt4);
+      DECLARE_METHOD(SIMDCmpGt4);
+      DECLARE_METHOD(SIMDFAdd4);
+      DECLARE_METHOD(SIMDFSub4);
     };
 
   }
