@@ -236,11 +236,24 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
       case ExpressionType::COMPARE_GREATERTHANOREQUALTO: {
         auto *lhs = cmp_exp->GetChild(0);
         auto *rhs = cmp_exp->GetChild(1);
-        if ((dynamic_cast<const expression::ConstantValueExpression *>(lhs) ||
-             dynamic_cast<const expression::TupleValueExpression *>(lhs)) &&
-            (dynamic_cast<const expression::ConstantValueExpression *>(rhs) ||
-             dynamic_cast<const expression::TupleValueExpression *>(rhs))) {
-          is_simple_cmp = true;
+        auto lhs_typ = lhs->GetValueType();
+        auto rhs_typ = rhs->GetValueType();
+        if ((lhs_typ == peloton::type::TypeId::BOOLEAN ||
+             lhs_typ == peloton::type::TypeId::TINYINT ||
+             lhs_typ == peloton::type::TypeId::SMALLINT ||
+             lhs_typ == peloton::type::TypeId::INTEGER ||
+             lhs_typ == peloton::type::TypeId::DECIMAL) &&
+            (rhs_typ == peloton::type::TypeId::BOOLEAN ||
+             rhs_typ == peloton::type::TypeId::TINYINT ||
+             rhs_typ == peloton::type::TypeId::SMALLINT ||
+             rhs_typ == peloton::type::TypeId::INTEGER ||
+             rhs_typ == peloton::type::TypeId::DECIMAL)) {
+          if ((dynamic_cast<const expression::ConstantValueExpression *>(lhs) ||
+               dynamic_cast<const expression::TupleValueExpression *>(lhs)) &&
+              (dynamic_cast<const expression::ConstantValueExpression *>(rhs) ||
+               dynamic_cast<const expression::TupleValueExpression *>(rhs))) {
+            is_simple_cmp = true;
+          }
         }
         break;
       }
