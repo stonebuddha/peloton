@@ -19,6 +19,9 @@
 #include "codegen/proxy/runtime_functions_proxy.h"
 #include "codegen/proxy/zone_map_proxy.h"
 #include "codegen/type/boolean_type.h"
+#include "expression/comparison_expression.h"
+#include "expression/constant_value_expression.h"
+#include "expression/tuple_value_expression.h"
 #include "planner/seq_scan_plan.h"
 #include "storage/data_table.h"
 #include "storage/zone_map_manager.h"
@@ -221,18 +224,55 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
     batch.AddAttribute(accessor.GetAttributeRef(), &accessor);
   }
 
-  // Iterate over the batch using a scalar loop
-  batch.Iterate(codegen, [&](RowBatch::Row &row) {
-    // Evaluate the predicate to determine row validity
-    codegen::Value valid_row = row.DeriveValue(codegen, *predicate);
+  bool is_simple_cmp = false;
+  if (auto *cmp_exp = dynamic_cast<const expression::ComparisonExpression *>(predicate)) {
+    auto type = cmp_exp->GetExpressionType();
+    switch (type) {
+      case ExpressionType::COMPARE_EQUAL:
+      case ExpressionType::COMPARE_NOTEQUAL:
+      case ExpressionType::COMPARE_LESSTHAN:
+      case ExpressionType::COMPARE_GREATERTHAN:
+      case ExpressionType::COMPARE_LESSTHANOREQUALTO:
+      case ExpressionType::COMPARE_GREATERTHANOREQUALTO: {
+        auto *lhs = cmp_exp->GetChild(0);
+        auto *rhs = cmp_exp->GetChild(1);
+        if ((dynamic_cast<const expression::ConstantValueExpression *>(lhs) ||
+             dynamic_cast<const expression::TupleValueExpression *>(lhs)) &&
+            (dynamic_cast<const expression::ConstantValueExpression *>(rhs) ||
+             dynamic_cast<const expression::TupleValueExpression *>(rhs))) {
+          is_simple_cmp = true;
+        }
+        break;
+      }
+      default:;
+    }
+  }
 
-    // Reify the boolean value since it may be NULL
-    PL_ASSERT(valid_row.GetType().GetSqlType() == type::Boolean::Instance());
-    llvm::Value *bool_val = type::Boolean::Instance().Reify(codegen, valid_row);
+  if (!is_simple_cmp) {
+    // Iterate over the batch using a scalar loop
+    batch.Iterate(codegen, [&](RowBatch::Row &row) {
+      // Evaluate the predicate to determine row validity
+      codegen::Value valid_row = row.DeriveValue(codegen, *predicate);
 
-    // Set the validity of the row
-    row.SetValidity(codegen, bool_val);
-  });
+      // Reify the boolean value since it may be NULL
+      PL_ASSERT(valid_row.GetType().GetSqlType() == type::Boolean::Instance());
+      llvm::Value *bool_val = type::Boolean::Instance().Reify(codegen, valid_row);
+
+      // Set the validity of the row
+      row.SetValidity(codegen, bool_val);
+    });
+  } else {
+    LOG_DEBUG("Simple SIMDable Predicate Detected");
+    batch.VectorizedIterate(codegen, 1, [&](RowBatch::VectorizedIterateCallback::IterationInstance &ins) {
+      RowBatch::OutputTracker tracker{batch.GetSelectionVector(), ins.write_pos};
+      RowBatch::Row row = batch.GetRowAt(ins.start, &tracker);
+      codegen::Value valid_row = row.DeriveValue(codegen, *predicate);
+      PL_ASSERT(valid_row.GetType().GetSqlType() == type::Boolean::Instance());
+      llvm::Value *bool_val = type::Boolean::Instance().Reify(codegen, valid_row);
+      row.SetValidity(codegen, bool_val);
+      return tracker.GetFinalOutputPos();
+    });
+  }
 }
 
 //===----------------------------------------------------------------------===//
