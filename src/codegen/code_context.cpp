@@ -19,6 +19,7 @@
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_os_ostream.h"
 #include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/Vectorize.h"
 #if LLVM_VERSION_GE(3, 9)
 #include "llvm/Transforms/Scalar/GVN.h"
 #endif
@@ -133,6 +134,7 @@ CodeContext::CodeContext()
   pass_manager_->add(llvm::createCFGSimplificationPass());
   pass_manager_->add(llvm::createAggressiveDCEPass());
   pass_manager_->add(llvm::createCFGSimplificationPass());
+  pass_manager_->add(llvm::createLoopVectorizePass());
 
   // Setup the common types we need once
   bool_type_ = llvm::Type::getInt1Ty(*context_);
