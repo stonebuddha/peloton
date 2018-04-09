@@ -276,21 +276,23 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
     });
   } else {
     auto *orig_size = selection_vector.GetNumElements();
-    auto *align_size = codegen->CreateMul(codegen.Const32(2), codegen->CreateUDiv(orig_size, codegen.Const32(2)));
+    auto *align_size = codegen->CreateMul(codegen.Const32(4), codegen->CreateUDiv(orig_size, codegen.Const32(4)));
     selection_vector.SetNumElements(align_size);
 
-    batch.VectorizedIterate(codegen, 2, [&](RowBatch::VectorizedIterateCallback::IterationInstance &ins) {
-      RowBatch::OutputTracker tracker{batch.GetSelectionVector(), ins.write_pos};
+    batch.VectorizedIterate(codegen, 4, [&](RowBatch::VectorizedIterateCallback::IterationInstance &ins) {
+      llvm::Value *final_pos = ins.write_pos;
 
-      for (int i = 0; i < 2; ++ i) {
+      for (int i = 0; i < 4; ++ i) {
+        RowBatch::OutputTracker tracker{batch.GetSelectionVector(), final_pos};
         RowBatch::Row row = batch.GetRowAt(codegen->CreateAdd(ins.start, codegen.Const32(i)), &tracker);
         codegen::Value valid_row = row.DeriveValue(codegen, *predicate);
         PL_ASSERT(valid_row.GetType().GetSqlType() == type::Boolean::Instance());
         llvm::Value *bool_val = type::Boolean::Instance().Reify(codegen, valid_row);
         row.SetValidity(codegen, bool_val);
+        final_pos = tracker.GetFinalOutputPos();
       }
 
-      return tracker.GetFinalOutputPos();
+      return final_pos;
     });
 
     /*auto *tid_delta = codegen->CreateSub(tid_end, tid_start);
