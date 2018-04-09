@@ -242,11 +242,13 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
              lhs_typ == peloton::type::TypeId::TINYINT ||
              lhs_typ == peloton::type::TypeId::SMALLINT ||
              lhs_typ == peloton::type::TypeId::INTEGER ||
+             lhs_typ == peloton::type::TypeId::BIGINT ||
              lhs_typ == peloton::type::TypeId::DECIMAL) &&
             (rhs_typ == peloton::type::TypeId::BOOLEAN ||
              rhs_typ == peloton::type::TypeId::TINYINT ||
              rhs_typ == peloton::type::TypeId::SMALLINT ||
              rhs_typ == peloton::type::TypeId::INTEGER ||
+             rhs_typ == peloton::type::TypeId::BIGINT ||
              rhs_typ == peloton::type::TypeId::DECIMAL)) {
           if ((dynamic_cast<const expression::ConstantValueExpression *>(lhs) ||
                dynamic_cast<const expression::TupleValueExpression *>(lhs)) &&
@@ -275,7 +277,7 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
       row.SetValidity(codegen, bool_val);
     });
   } else {
-    int N = 4;
+    uint32_t N = 4;
 
     auto *orig_size = selection_vector.GetNumElements();
     auto *align_size = codegen->CreateMul(codegen.Const32(N), codegen->CreateUDiv(orig_size, codegen.Const32(N)));
