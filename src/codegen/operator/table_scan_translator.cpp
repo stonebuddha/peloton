@@ -275,16 +275,71 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
       row.SetValidity(codegen, bool_val);
     });
   } else {
-    LOG_DEBUG("Simple SIMDable Predicate Detected");
-    batch.VectorizedIterate(codegen, 1, [&](RowBatch::VectorizedIterateCallback::IterationInstance &ins) {
+    auto *orig_size = selection_vector.GetNumElements();
+    auto *align_size = codegen->CreateMul(codegen.Const32(2), codegen->CreateUDiv(orig_size, codegen.Const32(2)));
+    selection_vector.SetNumElements(align_size);
+
+    batch.VectorizedIterate(codegen, 2, [&](RowBatch::VectorizedIterateCallback::IterationInstance &ins) {
       RowBatch::OutputTracker tracker{batch.GetSelectionVector(), ins.write_pos};
-      RowBatch::Row row = batch.GetRowAt(ins.start, &tracker);
+
+      for (int i = 0; i < 2; ++ i) {
+        RowBatch::Row row = batch.GetRowAt(codegen->CreateAdd(ins.start, codegen.Const32(i)), &tracker);
+        codegen::Value valid_row = row.DeriveValue(codegen, *predicate);
+        PL_ASSERT(valid_row.GetType().GetSqlType() == type::Boolean::Instance());
+        llvm::Value *bool_val = type::Boolean::Instance().Reify(codegen, valid_row);
+        row.SetValidity(codegen, bool_val);
+      }
+
+      return tracker.GetFinalOutputPos();
+    });
+
+    /*auto *tid_delta = codegen->CreateSub(tid_end, tid_start);
+    auto *tid_align = codegen->CreateMul(codegen.Const32(2), codegen->CreateUDiv(tid_delta, codegen.Const32(2)));
+    RowBatch new_batch{compilation_ctx, tile_group_id_,   codegen->CreateAdd(tid_start, tid_align),
+                       tid_end,         selection_vector, true};
+    for (uint32_t i = 0; i < attribute_accessors.size(); i++) {
+      auto &accessor = attribute_accessors[i];
+      new_batch.AddAttribute(accessor.GetAttributeRef(), &accessor);
+    }
+    new_batch.Iterate(codegen, [&](RowBatch::Row &row) {
       codegen::Value valid_row = row.DeriveValue(codegen, *predicate);
       PL_ASSERT(valid_row.GetType().GetSqlType() == type::Boolean::Instance());
       llvm::Value *bool_val = type::Boolean::Instance().Reify(codegen, valid_row);
       row.SetValidity(codegen, bool_val);
-      return tracker.GetFinalOutputPos();
-    });
+    });*/
+
+    auto pre_bb = codegen->GetInsertBlock();
+    auto *check_post_batch_bb = llvm::BasicBlock::Create(codegen.GetContext(), "checkPostBatch", pre_bb->getParent());
+    auto *loop_post_batch_bb = llvm::BasicBlock::Create(codegen.GetContext(), "loopPostBatch", pre_bb->getParent());
+    auto *end_post_batch_bb = llvm::BasicBlock::Create(codegen.GetContext(), "endPostBatch", pre_bb->getParent());
+
+    codegen->CreateBr(check_post_batch_bb);
+
+    codegen->SetInsertPoint(check_post_batch_bb);
+    auto *idx_cur = codegen->CreatePHI(align_size->getType(), 2);
+    idx_cur->addIncoming(align_size, pre_bb);
+    auto *write_pos = codegen->CreatePHI(selection_vector.GetNumElements()->getType(), 2);
+    write_pos->addIncoming(selection_vector.GetNumElements(), pre_bb);
+    auto *cond = codegen->CreateICmpULT(idx_cur, orig_size);
+    codegen->CreateCondBr(cond, loop_post_batch_bb, end_post_batch_bb);
+
+    codegen->SetInsertPoint(loop_post_batch_bb);
+    {
+      RowBatch::OutputTracker tracker{batch.GetSelectionVector(), write_pos};
+      RowBatch::Row row = batch.GetRowAt(idx_cur, &tracker);
+      codegen::Value valid_row = row.DeriveValue(codegen, *predicate);
+      PL_ASSERT(valid_row.GetType().GetSqlType() == type::Boolean::Instance());
+      llvm::Value *bool_val = type::Boolean::Instance().Reify(codegen, valid_row);
+      row.SetValidity(codegen, bool_val);
+      idx_cur->addIncoming(codegen->CreateAdd(idx_cur, codegen.Const32(1)), loop_post_batch_bb);
+      write_pos->addIncoming(tracker.GetFinalOutputPos(), loop_post_batch_bb);
+      codegen->CreateBr(check_post_batch_bb);
+    }
+
+    codegen->SetInsertPoint(end_post_batch_bb);
+    batch.UpdateWritePosition(write_pos);
+
+    codegen->GetInsertBlock()->getParent()->dump();
   }
 }
 
