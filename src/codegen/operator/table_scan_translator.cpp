@@ -305,13 +305,13 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
       auto *cmp_exp = dynamic_cast<const expression::ComparisonExpression *>(predicate);
 
       if (lhs != nullptr && rhs != nullptr && cmp_exp != nullptr && cmp_exp->GetExpressionType() == ExpressionType::COMPARE_GREATERTHANOREQUALTO) {
-        for (int i = 0; i < N; ++i) {
+        for (uint32_t i = 0; i < N; ++i) {
           RowBatch::Row row = batch.GetRowAt(codegen->CreateAdd(ins.start, codegen.Const32(i)));
           codegen::Value eval_row = row.DeriveValue(codegen, *lch);
           llvm::Value *int_val = eval_row.GetValue();
           lhs = codegen->CreateInsertElement(lhs, int_val, i);
         }
-        for (int i = 0; i < N; ++i) {
+        for (uint32_t i = 0; i < N; ++i) {
           RowBatch::Row row = batch.GetRowAt(codegen->CreateAdd(ins.start, codegen.Const32(i)));
           codegen::Value eval_row = row.DeriveValue(codegen, *rch);
           llvm::Value *int_val = eval_row.GetValue();
@@ -320,14 +320,14 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
 
         auto *comp = codegen->CreateICmpSGE(lhs, rhs);
 
-        for (int i = 0; i < N; ++i) {
+        for (uint32_t i = 0; i < N; ++i) {
           RowBatch::OutputTracker tracker{batch.GetSelectionVector(), final_pos};
           RowBatch::Row row = batch.GetRowAt(codegen->CreateAdd(ins.start, codegen.Const32(i)), &tracker);
           row.SetValidity(codegen, codegen->CreateExtractElement(comp, i));
           final_pos = tracker.GetFinalOutputPos();
         }
       } else {
-        for (int i = 0; i < N; ++i) {
+        for (uint32_t i = 0; i < N; ++i) {
           RowBatch::OutputTracker tracker{batch.GetSelectionVector(), final_pos};
           RowBatch::Row row = batch.GetRowAt(codegen->CreateAdd(ins.start, codegen.Const32(i)), &tracker);
           codegen::Value valid_row = row.DeriveValue(codegen, *predicate);
