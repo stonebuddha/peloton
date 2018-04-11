@@ -19,6 +19,7 @@
 #include "codegen/proxy/runtime_functions_proxy.h"
 #include "codegen/proxy/zone_map_proxy.h"
 #include "codegen/type/boolean_type.h"
+#include "codegen/type/type.h"
 #include "expression/comparison_expression.h"
 #include "expression/constant_value_expression.h"
 #include "expression/tuple_value_expression.h"
@@ -243,13 +244,17 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
              lhs_typ == peloton::type::TypeId::SMALLINT ||
              lhs_typ == peloton::type::TypeId::INTEGER ||
              lhs_typ == peloton::type::TypeId::BIGINT ||
-             lhs_typ == peloton::type::TypeId::DECIMAL) &&
+             lhs_typ == peloton::type::TypeId::DECIMAL ||
+             lhs_typ == peloton::type::TypeId::TIMESTAMP ||
+             lhs_typ == peloton::type::TypeId::DATE) &&
             (rhs_typ == peloton::type::TypeId::BOOLEAN ||
              rhs_typ == peloton::type::TypeId::TINYINT ||
              rhs_typ == peloton::type::TypeId::SMALLINT ||
              rhs_typ == peloton::type::TypeId::INTEGER ||
              rhs_typ == peloton::type::TypeId::BIGINT ||
-             rhs_typ == peloton::type::TypeId::DECIMAL)) {
+             rhs_typ == peloton::type::TypeId::DECIMAL ||
+             rhs_typ == peloton::type::TypeId::TIMESTAMP ||
+             rhs_typ == peloton::type::TypeId::DATE)) {
           if ((dynamic_cast<const expression::ConstantValueExpression *>(lhs) ||
                dynamic_cast<const expression::TupleValueExpression *>(lhs)) &&
               (dynamic_cast<const expression::ConstantValueExpression *>(rhs) ||
@@ -277,7 +282,7 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
       row.SetValidity(codegen, bool_val);
     });
   } else {
-    uint32_t N = 4;
+    uint32_t N = 32;
 
     auto *orig_size = selection_vector.GetNumElements();
     auto *align_size = codegen->CreateMul(codegen.Const32(N), codegen->CreateUDiv(orig_size, codegen.Const32(N)));
@@ -292,50 +297,62 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
       auto *lch = predicate->GetChild(0);
       auto *rch = predicate->GetChild(1);
 
-      switch (lch->GetValueType()) {
-        case peloton::type::TypeId::INTEGER:
-          lhs = llvm::UndefValue::get(llvm::VectorType::get(codegen.Int32Type(), N));
-        default:;
-      }
-      switch (rch->GetValueType()) {
-        case peloton::type::TypeId::INTEGER:
-          rhs = llvm::UndefValue::get(llvm::VectorType::get(codegen.Int32Type(), N));
-        default:;
-      }
+      auto typ_lch = type::Type(lch->GetValueType(), false);
+      auto typ_rch = type::Type(rch->GetValueType(), false);
+      llvm::Type *dummy, *typ_lhs, *typ_rhs;
+
+      typ_lch.GetSqlType().GetTypeForMaterialization(codegen, typ_lhs, dummy);
+      typ_rch.GetSqlType().GetTypeForMaterialization(codegen, typ_rhs, dummy);
+
+      lhs = llvm::UndefValue::get(llvm::VectorType::get(typ_lhs, N));
+      rhs = llvm::UndefValue::get(llvm::VectorType::get(typ_rhs, N));
+
       auto *cmp_exp = dynamic_cast<const expression::ComparisonExpression *>(predicate);
 
-      if (lhs != nullptr && rhs != nullptr && cmp_exp != nullptr && cmp_exp->GetExpressionType() == ExpressionType::COMPARE_GREATERTHANOREQUALTO) {
-        for (uint32_t i = 0; i < N; ++i) {
-          RowBatch::Row row = batch.GetRowAt(codegen->CreateAdd(ins.start, codegen.Const32(i)));
-          codegen::Value eval_row = row.DeriveValue(codegen, *lch);
-          llvm::Value *int_val = eval_row.GetValue();
-          lhs = codegen->CreateInsertElement(lhs, int_val, i);
-        }
-        for (uint32_t i = 0; i < N; ++i) {
-          RowBatch::Row row = batch.GetRowAt(codegen->CreateAdd(ins.start, codegen.Const32(i)));
-          codegen::Value eval_row = row.DeriveValue(codegen, *rch);
-          llvm::Value *int_val = eval_row.GetValue();
-          rhs = codegen->CreateInsertElement(rhs, int_val, i);
-        }
+      for (uint32_t i = 0; i < N; ++i) {
+        RowBatch::Row row = batch.GetRowAt(codegen->CreateAdd(ins.start, codegen.Const32(i)));
+        codegen::Value eval_row = row.DeriveValue(codegen, *lch);
+        llvm::Value *int_val = eval_row.GetValue();
+        lhs = codegen->CreateInsertElement(lhs, int_val, i);
+      }
+      for (uint32_t i = 0; i < N; ++i) {
+        RowBatch::Row row = batch.GetRowAt(codegen->CreateAdd(ins.start, codegen.Const32(i)));
+        codegen::Value eval_row = row.DeriveValue(codegen, *rch);
+        llvm::Value *int_val = eval_row.GetValue();
+        rhs = codegen->CreateInsertElement(rhs, int_val, i);
+      }
 
-        auto *comp = codegen->CreateICmpSGE(lhs, rhs);
+      codegen::Value val_lhs(typ_lch, lhs);
+      codegen::Value val_rhs(typ_rch, rhs);
 
-        for (uint32_t i = 0; i < N; ++i) {
-          RowBatch::OutputTracker tracker{batch.GetSelectionVector(), final_pos};
-          RowBatch::Row row = batch.GetRowAt(codegen->CreateAdd(ins.start, codegen.Const32(i)), &tracker);
-          row.SetValidity(codegen, codegen->CreateExtractElement(comp, i));
-          final_pos = tracker.GetFinalOutputPos();
-        }
-      } else {
-        for (uint32_t i = 0; i < N; ++i) {
-          RowBatch::OutputTracker tracker{batch.GetSelectionVector(), final_pos};
-          RowBatch::Row row = batch.GetRowAt(codegen->CreateAdd(ins.start, codegen.Const32(i)), &tracker);
-          codegen::Value valid_row = row.DeriveValue(codegen, *predicate);
-          PL_ASSERT(valid_row.GetType().GetSqlType() == type::Boolean::Instance());
-          llvm::Value *bool_val = type::Boolean::Instance().Reify(codegen, valid_row);
-          row.SetValidity(codegen, bool_val);
-          final_pos = tracker.GetFinalOutputPos();
-        }
+      llvm::Value *comp = nullptr;
+      switch (cmp_exp->GetExpressionType()) {
+        case ExpressionType::COMPARE_EQUAL:
+          comp = val_lhs.CompareEq(codegen, val_rhs).GetValue();
+          break;
+        case ExpressionType::COMPARE_NOTEQUAL:
+          comp = val_lhs.CompareNe(codegen, val_rhs).GetValue();
+          break;
+        case ExpressionType::COMPARE_LESSTHAN:
+          comp = val_lhs.CompareLt(codegen, val_rhs).GetValue();
+          break;
+        case ExpressionType::COMPARE_LESSTHANOREQUALTO:
+          comp = val_lhs.CompareLte(codegen, val_rhs).GetValue();
+          break;
+        case ExpressionType::COMPARE_GREATERTHAN:
+          comp = val_lhs.CompareGt(codegen, val_rhs).GetValue();
+          break;
+        case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
+          comp = val_lhs.CompareGte(codegen, val_rhs).GetValue();
+          break;
+        default:;
+      }
+
+      for (uint32_t i = 0; i < N; ++i) {
+        RowBatch::OutputTracker tracker{batch.GetSelectionVector(), final_pos};
+        RowBatch::Row row = batch.GetRowAt(codegen->CreateAdd(ins.start, codegen.Const32(i)), &tracker);
+        row.SetValidity(codegen, codegen->CreateExtractElement(comp, i));
+        final_pos = tracker.GetFinalOutputPos();
       }
 
       return final_pos;
@@ -372,7 +389,7 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
     codegen->SetInsertPoint(end_post_batch_bb);
     batch.UpdateWritePosition(write_pos);
 
-    codegen->GetInsertBlock()->getParent()->dump();
+    // codegen->GetInsertBlock()->getParent()->dump();
   }
 }
 
