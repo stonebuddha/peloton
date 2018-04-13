@@ -94,7 +94,7 @@ void PlanGenerator::Visit(const PhysicalSeqScan *op) {
   output_plan_.reset(new planner::SeqScanPlan(
       storage::StorageManager::GetInstance()->GetTableWithOid(
           op->table_->GetDatabaseOid(), op->table_->GetTableOid()),
-      predicate.release(), column_ids, &simd_predicates,
+      predicate.release(), column_ids, false, &simd_predicates,
       non_simd_predicate.release()));
 }
 
