@@ -54,6 +54,12 @@ TableScanTranslator::TableScanTranslator(const planner::SeqScanPlan &scan,
       pipeline.InstallBoundaryAtOutput(this);
     }
   }
+
+  const auto *non_simd_predicate = GetScanPlan().GetNonSIMDPredicate();
+  if (non_simd_predicate != nullptr) {
+    context.Prepare(*non_simd_predicate);
+  }
+
   LOG_DEBUG("Finished constructing TableScanTranslator ...");
 }
 
