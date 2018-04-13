@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "optimizer/util.h"
 #include "optimizer/operators.h"
 #include "optimizer/operator_visitor.h"
 #include "expression/expression_util.h"
@@ -51,7 +52,7 @@ hash_t LogicalGet::Hash() const {
 }
 
 bool LogicalGet::operator==(const BaseOperatorNode &r) {
-  if (r.GetType()!= OpType::Get) return false;
+  if (r.GetType() != OpType::Get) return false;
   const LogicalGet &node = *static_cast<const LogicalGet *>(&r);
   if (predicates.size() != node.predicates.size()) return false;
   for (size_t i = 0; i < predicates.size(); i++) {
@@ -385,8 +386,8 @@ Operator LogicalDelete::make(
 //===--------------------------------------------------------------------===//
 Operator LogicalUpdate::make(
     std::shared_ptr<catalog::TableCatalogObject> target_table,
-    const std::vector<std::unique_ptr<peloton::parser::UpdateClause>>
-        *updates) {
+    const std::vector<std::unique_ptr<peloton::parser::UpdateClause>> *
+        updates) {
   LogicalUpdate *update_op = new LogicalUpdate;
   update_op->target_table = target_table;
   update_op->updates = updates;
@@ -433,6 +434,10 @@ Operator PhysicalSeqScan::make(
   scan->predicates = std::move(predicates);
   scan->is_for_update = update;
   scan->get_id = get_id;
+
+  // Identify the SIMD and non-SIMD instructions in the predicates
+  util::IdentifySIMDPredicates(predicates, scan->simd_predicates_,
+                               scan->non_simd_predicates_);
 
   return Operator(scan);
 }
@@ -748,8 +753,8 @@ Operator PhysicalDelete::make(
 //===--------------------------------------------------------------------===//
 Operator PhysicalUpdate::make(
     std::shared_ptr<catalog::TableCatalogObject> target_table,
-    const std::vector<std::unique_ptr<peloton::parser::UpdateClause>>
-        *updates) {
+    const std::vector<std::unique_ptr<peloton::parser::UpdateClause>> *
+        updates) {
   PhysicalUpdate *update = new PhysicalUpdate;
   update->target_table = target_table;
   update->updates = updates;

@@ -79,10 +79,23 @@ void PlanGenerator::Visit(const PhysicalSeqScan *op) {
   auto predicate = GeneratePredicateForScan(
       expression::ExpressionUtil::JoinAnnotatedExprs(op->predicates),
       op->table_alias, op->table_);
+
+  // Convert SIMD AnnotatedExpression vector back to AbstractExpression
+  std::vector<std::unique_ptr<expression::AbstractExpression>> simd_predicates;
+  for (size_t i = 1; i < op->simd_predicates_.size(); ++i) {
+    simd_predicates.emplace_back(op->simd_predicates_[i].expr->Copy());
+  }
+
+  // Combine non-SIMD predicates back to a single predicate
+  auto non_simd_predicate = GeneratePredicateForScan(
+      expression::ExpressionUtil::JoinAnnotatedExprs(op->non_simd_predicates_),
+      op->table_alias, op->table_);
+
   output_plan_.reset(new planner::SeqScanPlan(
       storage::StorageManager::GetInstance()->GetTableWithOid(
           op->table_->GetDatabaseOid(), op->table_->GetTableOid()),
-      predicate.release(), column_ids));
+      predicate.release(), column_ids, false, &simd_predicates,
+      non_simd_predicate.release()));
 }
 
 void PlanGenerator::Visit(const PhysicalIndexScan *op) {
@@ -193,12 +206,12 @@ void PlanGenerator::Visit(const PhysicalInnerNLJoin *op) {
   vector<oid_t> right_keys;
   for (auto &expr : op->left_keys) {
     PELOTON_ASSERT(children_expr_map_[0].find(expr.get()) !=
-              children_expr_map_[0].end());
+                   children_expr_map_[0].end());
     left_keys.push_back(children_expr_map_[0][expr.get()]);
   }
   for (auto &expr : op->right_keys) {
     PELOTON_ASSERT(children_expr_map_[1].find(expr.get()) !=
-              children_expr_map_[1].end());
+                   children_expr_map_[1].end());
     right_keys.emplace_back(children_expr_map_[1][expr.get()]);
   }
 
@@ -372,7 +385,8 @@ vector<oid_t> PlanGenerator::GenerateColumnsForScan() {
   vector<oid_t> column_ids;
   for (oid_t idx = 0; idx < output_cols_.size(); ++idx) {
     auto &output_expr = output_cols_[idx];
-    PELOTON_ASSERT(output_expr->GetExpressionType() == ExpressionType::VALUE_TUPLE);
+    PELOTON_ASSERT(output_expr->GetExpressionType() ==
+                   ExpressionType::VALUE_TUPLE);
     auto output_tvexpr =
         reinterpret_cast<expression::TupleValueExpression *>(output_expr);
 
@@ -455,8 +469,8 @@ void PlanGenerator::BuildProjectionPlan() {
 
 void PlanGenerator::BuildAggregatePlan(
     AggregateType aggr_type,
-    const std::vector<std::shared_ptr<expression::AbstractExpression>>
-        *groupby_cols,
+    const std::vector<std::shared_ptr<expression::AbstractExpression>> *
+        groupby_cols,
     std::unique_ptr<expression::AbstractExpression> having_predicate) {
   vector<planner::AggregatePlan::AggTerm> aggr_terms;
   vector<catalog::Column> output_schema_columns;
