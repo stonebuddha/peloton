@@ -105,6 +105,7 @@ void TableScanTranslator::Produce() const {
   ScanConsumer scan_consumer{*this, sel_vec};
   table_.GenerateScan(codegen, table_ptr, sel_vec.GetCapacity(), scan_consumer,
                       predicate_ptr, num_preds);
+  codegen.Call(TransactionRuntimeProxy::PrintClockDuration, {});
   LOG_TRACE("TableScan on [%u] finished producing tuples ...", table.GetOid());
 }
 
@@ -229,6 +230,8 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
 
   const auto &simd_predicates = GetSIMDPredicates();
   const auto *non_simd_predicate = GetNonSIMDPredicate();
+
+  codegen.Call(TransactionRuntimeProxy::GetClockStart, {});
 
   if (simd_predicates.empty() && non_simd_predicate == nullptr) {
     non_simd_predicate = GetPredicate();
@@ -414,6 +417,8 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
       row.SetValidity(codegen, bool_val);
     });
   }
+
+  codegen.Call(TransactionRuntimeProxy::GetClockPause, {});
 }
 
 //===----------------------------------------------------------------------===//
