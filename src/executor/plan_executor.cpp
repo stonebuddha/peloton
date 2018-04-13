@@ -17,6 +17,7 @@
 #include "codegen/query_cache.h"
 #include "codegen/query_compiler.h"
 #include "common/logger.h"
+#include "common/timer.h"
 #include "concurrency/transaction_manager_factory.h"
 #include "executor/executor_context.h"
 #include "executor/executors.h"
@@ -78,7 +79,11 @@ static void CompileAndExecutePlan(
         on_complete(result, std::move(values));
       };
 
+  Timer<std::ratio<1, 1000>> timer;
+  timer.Start();
   query->Execute(std::move(executor_context), consumer, on_query_result);
+  timer.Stop();
+  LOG_DEBUG("Time of query execution: %lf", timer.GetDuration());
 }
 
 static void InterpretPlan(
