@@ -379,7 +379,7 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
       RowBatch::OutputTracker tracker{batch.GetSelectionVector(), write_pos};
       RowBatch::Row row = batch.GetRowAt(idx_cur, &tracker);
       codegen::Value valid_row = row.DeriveValue(codegen, *predicate);
-      PL_ASSERT(valid_row.GetType().GetSqlType() == type::Boolean::Instance());
+      PELOTON_ASSERT(valid_row.GetType().GetSqlType() == type::Boolean::Instance());
       llvm::Value *bool_val = type::Boolean::Instance().Reify(codegen, valid_row);
       row.SetValidity(codegen, bool_val);
       idx_cur->addIncoming(codegen->CreateAdd(idx_cur, codegen.Const32(1)), loop_post_batch_bb);
