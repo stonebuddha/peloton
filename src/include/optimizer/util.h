@@ -176,8 +176,8 @@ void ExtractEquiJoinKeys(
  */
 void IdentifySIMDPredicates(
     const std::vector<AnnotatedExpression> &predicates,
-    const std::vector<AnnotatedExpression> &simd_predicates,
-    const std::vector<AnnotatedExpression> &non_simd_predicates);
+    std::vector<AnnotatedExpression> &simd_predicates,
+    std::vector<AnnotatedExpression> &non_simd_predicates);
 
 }  // namespace util
 }  // namespace optimizer
