@@ -326,13 +326,37 @@ void SeqScanPlan::VisitParameters(
   if (predicate != nullptr) {
     predicate->VisitParameters(map, values, values_from_user);
   }
+
+  for (auto &simd_predicate : GetSIMDPredicates()) {
+    if (simd_predicate != nullptr) {
+      simd_predicate->VisitParameters(map, values, values_from_user);
+    }
+  }
+
+  auto *non_simd_predicate =
+      const_cast<expression::AbstractExpression *>(GetNonSIMDPredicate());
+  if (non_simd_predicate != nullptr) {
+    non_simd_predicate->VisitParameters(map, values, values_from_user);
+  }
 }
 
 void SeqScanPlan::PerformBinding(BindingContext &binding_context) {
   AbstractScan::PerformBinding(binding_context);
 
-  auto predicate = non_simd_predicate_.get();
-  if (predicate != nullptr) {
+  for (auto &simd_predicate : simd_predicates_) {
+    if (simd_predicate != nullptr) {
+      BindingContext all_cols_context;
+      const auto *schema = GetTable()->GetSchema();
+      for (oid_t col_id = 0; col_id < schema->GetColumnCount(); col_id++) {
+        all_cols_context.BindNew(col_id, &attributes_[col_id]);
+      }
+
+      simd_predicate->PerformBinding({&all_cols_context});
+    }
+  }
+
+  auto non_simd_predicate = non_simd_predicate_.get();
+  if (non_simd_predicate != nullptr) {
     // We build a new binding context because the attributes the predicate needs
     // may not be part of the scan's output. Hence, we create a new context that
     // includes _all_ the table's attributes.
@@ -342,7 +366,7 @@ void SeqScanPlan::PerformBinding(BindingContext &binding_context) {
       all_cols_context.BindNew(col_id, &attributes_[col_id]);
     }
 
-    predicate->PerformBinding({&all_cols_context});
+    non_simd_predicate->PerformBinding({&all_cols_context});
   }
 }
 

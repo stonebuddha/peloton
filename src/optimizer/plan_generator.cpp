@@ -17,6 +17,8 @@
 #include "catalog/table_catalog.h"
 #include "concurrency/transaction_context.h"
 #include "expression/expression_util.h"
+#include "expression/tuple_value_expression.h"
+#include "expression/comparison_expression.h"
 #include "optimizer/operator_expression.h"
 #include "optimizer/properties.h"
 #include "planner/aggregate_plan.h"
@@ -82,8 +84,8 @@ void PlanGenerator::Visit(const PhysicalSeqScan *op) {
 
   // Convert SIMD AnnotatedExpression vector back to AbstractExpression
   std::vector<std::unique_ptr<expression::AbstractExpression>> simd_predicates;
-  for (size_t i = 1; i < op->simd_predicates_.size(); ++i) {
-    simd_predicates.emplace_back(op->simd_predicates_[i].expr->Copy());
+  for (size_t i = 0; i < op->simd_predicates_.size(); ++i) {
+    simd_predicates.emplace_back(GeneratePredicateForScan(op->simd_predicates_[i].expr, op->table_alias, op->table_));
   }
 
   // Combine non-SIMD predicates back to a single predicate

@@ -276,7 +276,7 @@ void IdentifySIMDPredicates(
            l_expr_type == ExpressionType::VALUE_CONSTANT ||
            l_expr_type == ExpressionType::VALUE_PARAMETER) &&
           (r_expr_type == ExpressionType::VALUE_TUPLE ||
-           l_expr_type == ExpressionType::VALUE_CONSTANT ||
+           r_expr_type == ExpressionType::VALUE_CONSTANT ||
            r_expr_type == ExpressionType::VALUE_PARAMETER)) {
         auto l_val_type = l_expr->GetValueType();
         auto r_val_type = r_expr->GetValueType();
@@ -293,7 +293,6 @@ void IdentifySIMDPredicates(
           // Push the SIMD predicate
           simdable = true;
           simd_predicates.emplace_back(expr_unit);
-          LOG_WARN("SIMD predicate: %s", expr_unit.expr->GetInfo().c_str());
         }
       }
     }
@@ -301,7 +300,6 @@ void IdentifySIMDPredicates(
     // Push the non-SIMD predicate
     if (simdable == false) {
       non_simd_predicates.emplace_back(expr_unit);
-      LOG_WARN("non-SIMD predicate: %s", expr_unit.expr->GetInfo().c_str());
     }
   }
 }

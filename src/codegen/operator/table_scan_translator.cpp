@@ -55,6 +55,12 @@ TableScanTranslator::TableScanTranslator(const planner::SeqScanPlan &scan,
     }
   }
 
+  for (const auto &simd_predicate : GetScanPlan().GetSIMDPredicates()) {
+    if (simd_predicate != nullptr) {
+      context.Prepare(*simd_predicate);
+    }
+  }
+
   const auto *non_simd_predicate = GetScanPlan().GetNonSIMDPredicate();
   if (non_simd_predicate != nullptr) {
     context.Prepare(*non_simd_predicate);
@@ -217,10 +223,7 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
     CodeGen &codegen, const TileGroup::TileGroupAccess &access,
     llvm::Value *tid_start, llvm::Value *tid_end,
     Vector &selection_vector) const {
-  // The batch we're filtering
   auto &compilation_ctx = translator_.GetCompilationContext();
-  RowBatch batch{compilation_ctx, tile_group_id_,   tid_start,
-                 tid_end,         selection_vector, true};
 
   const auto &simd_predicates = GetSIMDPredicates();
   const auto *non_simd_predicate = GetNonSIMDPredicate();
@@ -230,10 +233,13 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
   }
 
   for (auto &simd_predicate : simd_predicates) {
+    // The batch we're filtering
+    RowBatch batch{compilation_ctx, tile_group_id_,   tid_start,
+                   tid_end,         selection_vector, true};
+
     // Determine the attributes the predicate needs
     std::unordered_set<const planner::AttributeInfo *> used_attributes;
     simd_predicate->GetUsedAttributes(used_attributes);
-    LOG_DEBUG("SIMD predicate detected");
 
     // Setup the row batch with attribute accessors for the predicate
     std::vector<AttributeAccess> attribute_accessors;
@@ -355,6 +361,10 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
   }
 
   if (non_simd_predicate != nullptr) {
+    // The batch we're filtering
+    RowBatch batch{compilation_ctx, tile_group_id_,   tid_start,
+                   tid_end,         selection_vector, true};
+
     // Determine the attributes the predicate needs
     std::unordered_set<const planner::AttributeInfo *> used_attributes;
     non_simd_predicate->GetUsedAttributes(used_attributes);
