@@ -52,9 +52,9 @@ class SeqScanPlan : public AbstractScan {
     if (simd_predicates != nullptr) {
       std::move(simd_predicates->begin(), simd_predicates->end(),
                 std::back_inserter(simd_predicates_));
-    } else {
-      non_simd_predicate_.reset(non_simd_predicate);
     }
+
+    non_simd_predicate_.reset(non_simd_predicate);
   }
 
   SeqScanPlan() : AbstractScan() {}
