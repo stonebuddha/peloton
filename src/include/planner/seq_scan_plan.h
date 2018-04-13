@@ -41,7 +41,7 @@ class SeqScanPlan : public AbstractScan {
   SeqScanPlan(storage::DataTable *table,
               expression::AbstractExpression *predicate,
               const std::vector<oid_t> &column_ids, bool is_for_update = false,
-              std::vector<std::unique_ptr<expression::AbstractExpression> > *
+              std::vector<std::unique_ptr<expression::AbstractExpression>> *
                   simd_predicates = nullptr,
               expression::AbstractExpression *non_simd_predicate = nullptr)
       : AbstractScan(table, predicate, column_ids) {
@@ -52,8 +52,9 @@ class SeqScanPlan : public AbstractScan {
     if (simd_predicates != nullptr) {
       std::move(simd_predicates->begin(), simd_predicates->end(),
                 std::back_inserter(simd_predicates_));
+    } else {
+      non_simd_predicate_.reset(non_simd_predicate);
     }
-    non_simd_predicate_.reset(non_simd_predicate);
   }
 
   SeqScanPlan() : AbstractScan() {}
@@ -62,7 +63,8 @@ class SeqScanPlan : public AbstractScan {
     return non_simd_predicate_.get();
   }
 
-  const std::vector<std::unique_ptr<expression::AbstractExpression>> &GetSIMDPredicates() const {
+  const std::vector<std::unique_ptr<expression::AbstractExpression>> &
+  GetSIMDPredicates() const {
     return simd_predicates_;
   }
 
@@ -111,8 +113,7 @@ class SeqScanPlan : public AbstractScan {
   // Extra copy of predicates for the SIMDable and non-SIMDable ones
   // TODO(Lin): Eventually we'll get rid of the original copy of the predicates
   // above after we move the zonemap thing into the optimizer correctly
-  std::vector<std::unique_ptr<expression::AbstractExpression> >
-      simd_predicates_;
+  std::vector<std::unique_ptr<expression::AbstractExpression>> simd_predicates_;
   std::unique_ptr<expression::AbstractExpression> non_simd_predicate_;
 };
 

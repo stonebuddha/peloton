@@ -435,6 +435,8 @@ Operator PhysicalSeqScan::make(
   scan->is_for_update = update;
   scan->get_id = get_id;
 
+  LOG_WARN("hahahaha");
+
   // Identify the SIMD and non-SIMD instructions in the predicates
   util::IdentifySIMDPredicates(predicates, scan->simd_predicates_,
                                scan->non_simd_predicates_);
