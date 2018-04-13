@@ -33,11 +33,11 @@ class DataTable;
 namespace optimizer {
 namespace util {
 
-  /**
-   * @brief Convert upper case letters into lower case in a string
-   *
-   * @param str The string to operate on
-   */
+/**
+ * @brief Convert upper case letters into lower case in a string
+ *
+ * @param str The string to operate on
+ */
 inline void to_lower_string(std::string &str) {
   std::transform(str.begin(), str.end(), str.begin(), ::tolower);
 }
@@ -110,7 +110,6 @@ expression::AbstractExpression *ConstructJoinPredicate(
     std::unordered_set<std::string> &table_alias_set,
     MultiTablePredicates &join_predicates);
 
-
 /**
  * @breif Check if there are any join columns in the join expression
  *  For example, expr = (expr_1) AND (expr_2) AND (expr_3)
@@ -152,8 +151,8 @@ ConstructSelectElementMap(
  */
 expression::AbstractExpression *TransformQueryDerivedTablePredicates(
     const std::unordered_map<std::string,
-                             std::shared_ptr<expression::AbstractExpression>>
-        &alias_to_expr_map,
+                             std::shared_ptr<expression::AbstractExpression>> &
+        alias_to_expr_map,
     expression::AbstractExpression *expr);
 
 /**
@@ -166,6 +165,19 @@ void ExtractEquiJoinKeys(
     std::vector<std::unique_ptr<expression::AbstractExpression>> &right_keys,
     const std::unordered_set<std::string> &left_alias,
     const std::unordered_set<std::string> &right_alias);
+
+/**
+ * @brief Walk through a set of annotated predicates, generate the set of
+ * SIMDable ones and non-SIMDable ones
+ *
+ * @param predicates The predicates to identify SIMD ones
+ * @param simd_predicates The returned SIMDable predicates
+ * @param non_simd_predicates The returned non-SIMDable predicates
+ */
+void IdentifySIMDPredicates(
+    const std::vector<AnnotatedExpression> &predicates,
+    const std::vector<AnnotatedExpression> &simd_predicates,
+    const std::vector<AnnotatedExpression> &non_simd_predicates);
 
 }  // namespace util
 }  // namespace optimizer

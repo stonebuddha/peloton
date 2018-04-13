@@ -18,6 +18,7 @@
 #include "planner/copy_plan.h"
 #include "planner/seq_scan_plan.h"
 #include "storage/data_table.h"
+#include "type/type_id.h"
 
 namespace peloton {
 namespace optimizer {
@@ -197,8 +198,8 @@ ConstructSelectElementMap(
 
 expression::AbstractExpression *TransformQueryDerivedTablePredicates(
     const std::unordered_map<std::string,
-                             std::shared_ptr<expression::AbstractExpression>>
-        &alias_to_expr_map,
+                             std::shared_ptr<expression::AbstractExpression>> &
+        alias_to_expr_map,
     expression::AbstractExpression *expr) {
   if (expr->GetExpressionType() == ExpressionType::VALUE_TUPLE) {
     auto new_expr =
@@ -244,6 +245,60 @@ void ExtractEquiJoinKeys(
           right_keys.emplace_back(l_tv_expr->Copy());
         }
       }
+    }
+  }
+}
+
+void IdentifySIMDPredicates(
+    const std::vector<AnnotatedExpression> &predicates,
+    std::vector<AnnotatedExpression> &simd_predicates,
+    std::vector<AnnotatedExpression> &non_simd_predicates) {
+  for (auto &expr_unit : predicates) {
+    bool simdable = false;
+
+    // We only do SIMD for equality or comparison predicates
+    auto expr_type = expr_unit.expr->GetExpressionType();
+    if (expr_type == ExpressionType::COMPARE_EQUAL ||
+        expr_type == ExpressionType::COMPARE_LESSTHAN ||
+        expr_type == ExpressionType::COMPARE_LESSTHANOREQUALTO ||
+        expr_type == ExpressionType::COMPARE_GREATERTHAN ||
+        expr_type == ExpressionType::COMPARE_GREATERTHANOREQUALTO) {
+      auto l_expr = expr_unit.expr->GetChild(0);
+      auto r_expr = expr_unit.expr->GetChild(1);
+      auto l_expr_type = l_expr->GetExpressionType();
+      auto r_expr_type = r_expr->GetExpressionType();
+
+      // Check that the left and right children are either VALUE_TYPE or
+      // CONSTANT expressions. We assume that it would already be optimized by
+      // earlier passes if both children are constants.
+      if ((l_expr_type == ExpressionType::VALUE_TUPLE ||
+           l_expr_type == ExpressionType::VALUE_CONSTANT ||
+           l_expr_type == ExpressionType::VALUE_PARAMETER) &&
+          (r_expr_type == ExpressionType::VALUE_TUPLE ||
+           l_expr_type == ExpressionType::VALUE_CONSTANT ||
+           r_expr_type == ExpressionType::VALUE_PARAMETER)) {
+        auto l_val_type = l_expr->GetValueType();
+        auto r_val_type = r_expr->GetValueType();
+
+        // Now, exclude the types that are not SIMDable
+        if (l_val_type != type::TypeId::VARCHAR &&
+            l_val_type != type::TypeId::VARBINARY &&
+            l_val_type != type::TypeId::ARRAY &&
+            l_val_type != type::TypeId::UDT &&
+            r_val_type != type::TypeId::VARCHAR &&
+            r_val_type != type::TypeId::VARBINARY &&
+            r_val_type != type::TypeId::ARRAY &&
+            r_val_type != type::TypeId::UDT) {
+          // Push the SIMD predicate
+          simdable = true;
+          simd_predicates.emplace_back(expr_unit);
+        }
+      }
+    }
+
+    // Push the non-SIMD predicate
+    if (simdable == false) {
+      non_simd_predicates.emplace_back(expr_unit);
     }
   }
 }
