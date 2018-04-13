@@ -299,32 +299,33 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
 
       auto typ_lch = type::Type(lch->GetValueType(), false);
       auto typ_rch = type::Type(rch->GetValueType(), false);
-      llvm::Type *dummy, *typ_lhs, *typ_rhs;
 
-      typ_lch.GetSqlType().GetTypeForMaterialization(codegen, typ_lhs, dummy);
-      typ_rch.GetSqlType().GetTypeForMaterialization(codegen, typ_rhs, dummy);
+      auto cast_lch = typ_lch;
+      auto cast_rch = typ_rch;
+      type::TypeSystem::GetComparison(typ_lch, cast_lch, typ_rch, cast_rch);
+
+      llvm::Type *dummy, *typ_lhs, *typ_rhs;
+      cast_lch.GetSqlType().GetTypeForMaterialization(codegen, typ_lhs, dummy);
+      cast_rch.GetSqlType().GetTypeForMaterialization(codegen, typ_rhs, dummy);
 
       lhs = llvm::UndefValue::get(llvm::VectorType::get(typ_lhs, N));
       rhs = llvm::UndefValue::get(llvm::VectorType::get(typ_rhs, N));
-
-      auto *cmp_exp = dynamic_cast<const expression::ComparisonExpression *>(predicate);
-
       for (uint32_t i = 0; i < N; ++i) {
         RowBatch::Row row = batch.GetRowAt(codegen->CreateAdd(ins.start, codegen.Const32(i)));
         codegen::Value eval_row = row.DeriveValue(codegen, *lch);
-        llvm::Value *int_val = eval_row.GetValue();
-        lhs = codegen->CreateInsertElement(lhs, int_val, i);
+        llvm::Value *ins_val = eval_row.CastTo(codegen, cast_lch).GetValue();
+        lhs = codegen->CreateInsertElement(lhs, ins_val, i);
       }
       for (uint32_t i = 0; i < N; ++i) {
         RowBatch::Row row = batch.GetRowAt(codegen->CreateAdd(ins.start, codegen.Const32(i)));
         codegen::Value eval_row = row.DeriveValue(codegen, *rch);
-        llvm::Value *int_val = eval_row.GetValue();
-        rhs = codegen->CreateInsertElement(rhs, int_val, i);
+        llvm::Value *ins_val = eval_row.CastTo(codegen, cast_rch).GetValue();
+        rhs = codegen->CreateInsertElement(rhs, ins_val, i);
       }
+      codegen::Value val_lhs(cast_lch, lhs);
+      codegen::Value val_rhs(cast_rch, rhs);
 
-      codegen::Value val_lhs(typ_lch, lhs);
-      codegen::Value val_rhs(typ_rch, rhs);
-
+      auto *cmp_exp = dynamic_cast<const expression::ComparisonExpression *>(predicate);
       llvm::Value *comp = nullptr;
       switch (cmp_exp->GetExpressionType()) {
         case ExpressionType::COMPARE_EQUAL:
@@ -388,8 +389,6 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
 
     codegen->SetInsertPoint(end_post_batch_bb);
     batch.UpdateWritePosition(write_pos);
-
-    // codegen->GetInsertBlock()->getParent()->dump();
   }
 }
 
