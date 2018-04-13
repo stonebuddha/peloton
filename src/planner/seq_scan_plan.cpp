@@ -141,13 +141,13 @@ bool SeqScanPlan::DeserializeFrom(SerializeInput &input) {
 
   // Get table and set it to the member
   storage::DataTable *target_table = nullptr;
-  try{
-      target_table = static_cast<storage::DataTable *>(
-        storage::StorageManager::GetInstance()->GetTableWithOid(
-              database_oid, table_oid));
+  try {
+    target_table = static_cast<storage::DataTable *>(
+        storage::StorageManager::GetInstance()->GetTableWithOid(database_oid,
+                                                                table_oid));
   } catch (CatalogException &e) {
-      LOG_TRACE("Can't find table %d! Return false", table_oid);
-      return false;
+    LOG_TRACE("Can't find table %d! Return false", table_oid);
+    return false;
   }
   SetTargetTable(target_table);
 
@@ -286,15 +286,13 @@ hash_t SeqScanPlan::Hash() const {
 }
 
 bool SeqScanPlan::operator==(const AbstractPlan &rhs) const {
-  if (GetPlanNodeType() != rhs.GetPlanNodeType())
-    return false;
+  if (GetPlanNodeType() != rhs.GetPlanNodeType()) return false;
 
   auto &other = static_cast<const planner::SeqScanPlan &>(rhs);
   auto *table = GetTable();
   auto *other_table = other.GetTable();
   PELOTON_ASSERT(table && other_table);
-  if (*table != *other_table)
-    return false;
+  if (*table != *other_table) return false;
 
   // Predicate
   auto *pred = GetPredicate();
@@ -302,25 +300,21 @@ bool SeqScanPlan::operator==(const AbstractPlan &rhs) const {
   if ((pred == nullptr && other_pred != nullptr) ||
       (pred != nullptr && other_pred == nullptr))
     return false;
-  if (pred && *pred != *other_pred)
-    return false;
+  if (pred && *pred != *other_pred) return false;
 
   // Column Ids
   size_t column_id_count = GetColumnIds().size();
-  if (column_id_count != other.GetColumnIds().size())
-    return false;
+  if (column_id_count != other.GetColumnIds().size()) return false;
   for (size_t i = 0; i < column_id_count; i++) {
     if (GetColumnIds()[i] != other.GetColumnIds()[i]) {
       return false;
     }
   }
 
-  if (IsForUpdate() != other.IsForUpdate())
-    return false;
+  if (IsForUpdate() != other.IsForUpdate()) return false;
 
   return AbstractPlan::operator==(rhs);
 }
-
 
 void SeqScanPlan::VisitParameters(
     codegen::QueryParametersMap &map, std::vector<peloton::type::Value> &values,
@@ -331,6 +325,24 @@ void SeqScanPlan::VisitParameters(
       const_cast<expression::AbstractExpression *>(GetPredicate());
   if (predicate != nullptr) {
     predicate->VisitParameters(map, values, values_from_user);
+  }
+}
+
+void SeqScanPlan::PerformBinding(BindingContext &binding_context) {
+  AbstractScan::PerformBinding(binding_context);
+
+  auto predicate = non_simd_predicate_.get();
+  if (predicate != nullptr) {
+    // We build a new binding context because the attributes the predicate needs
+    // may not be part of the scan's output. Hence, we create a new context that
+    // includes _all_ the table's attributes.
+    BindingContext all_cols_context;
+    const auto *schema = GetTable()->GetSchema();
+    for (oid_t col_id = 0; col_id < schema->GetColumnCount(); col_id++) {
+      all_cols_context.BindNew(col_id, &attributes_[col_id]);
+    }
+
+    predicate->PerformBinding({&all_cols_context});
   }
 }
 
