@@ -254,6 +254,7 @@ void IdentifySIMDPredicates(
     std::vector<AnnotatedExpression> &simd_predicates,
     std::vector<AnnotatedExpression> &non_simd_predicates) {
   for (auto &expr_unit : predicates) {
+    LOG_WARN("Checking predicate: %s", expr_unit.expr->GetInfo().c_str());
     bool simdable = false;
 
     // We only do SIMD for equality or comparison predicates
@@ -292,6 +293,7 @@ void IdentifySIMDPredicates(
           // Push the SIMD predicate
           simdable = true;
           simd_predicates.emplace_back(expr_unit);
+          LOG_WARN("SIMD predicate: %s", expr_unit.expr->GetInfo().c_str());
         }
       }
     }
@@ -299,6 +301,7 @@ void IdentifySIMDPredicates(
     // Push the non-SIMD predicate
     if (simdable == false) {
       non_simd_predicates.emplace_back(expr_unit);
+      LOG_WARN("non-SIMD predicate: %s", expr_unit.expr->GetInfo().c_str());
     }
   }
 }

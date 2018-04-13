@@ -78,6 +78,9 @@ class AbstractScan : public AbstractPlan {
     return predicate_ != nullptr ? predicate_->GetInfo() : "";
   }
 
+ protected:
+  std::vector<AttributeInfo> attributes_;
+
  private:
   // Pointer to table to scan from
   storage::DataTable *target_table_ = nullptr;
@@ -87,8 +90,6 @@ class AbstractScan : public AbstractPlan {
 
   // Columns from tile group to be added to logical tile output
   std::vector<oid_t> column_ids_;
-
-  std::vector<AttributeInfo> attributes_;
 
   // "For Update" Flag
   bool is_for_update = false;

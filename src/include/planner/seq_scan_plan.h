@@ -107,6 +107,9 @@ class SeqScanPlan : public AbstractScan {
       std::vector<peloton::type::Value> &values,
       const std::vector<peloton::type::Value> &values_from_user) override;
 
+  // Attribute binding
+  void PerformBinding(BindingContext &binding_context) override;
+
  private:
   DISALLOW_COPY_AND_MOVE(SeqScanPlan);
 
