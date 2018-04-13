@@ -58,6 +58,14 @@ class SeqScanPlan : public AbstractScan {
 
   SeqScanPlan() : AbstractScan() {}
 
+  const expression::AbstractExpression *GetNonSIMDPredicate() const {
+    return non_simd_predicate_.get();
+  }
+
+  const std::vector<std::unique_ptr<expression::AbstractExpression>> &GetSIMDPredicates() const {
+    return simd_predicates_;
+  }
+
   PlanNodeType GetPlanNodeType() const override {
     return PlanNodeType::SEQSCAN;
   }

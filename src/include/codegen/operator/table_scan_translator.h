@@ -107,6 +107,12 @@ class TableScanTranslator : public OperatorTranslator {
     // Get the predicate, if one exists
     const expression::AbstractExpression *GetPredicate() const;
 
+    // Get the SIMD predicates, if one exists
+    const std::vector<std::unique_ptr<expression::AbstractExpression>> &GetSIMDPredicates() const;
+
+    // Get the non-SIMD predicate, if one exists
+    const expression::AbstractExpression *GetNonSIMDPredicate() const;
+
     void SetupRowBatch(RowBatch &batch,
                        TileGroup::TileGroupAccess &tile_group_access,
                        std::vector<AttributeAccess> &access) const;

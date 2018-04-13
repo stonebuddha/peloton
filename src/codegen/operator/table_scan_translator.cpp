@@ -199,6 +199,14 @@ TableScanTranslator::ScanConsumer::GetPredicate() const {
   return translator_.GetScanPlan().GetPredicate();
 }
 
+const std::vector<std::unique_ptr<expression::AbstractExpression>>& TableScanTranslator::ScanConsumer::GetSIMDPredicates() const {
+  return translator_.GetScanPlan().GetSIMDPredicates();
+}
+
+const expression::AbstractExpression* TableScanTranslator::ScanConsumer::GetNonSIMDPredicate() const {
+  return translator_.GetScanPlan().GetNonSIMDPredicate();
+}
+
 void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
     CodeGen &codegen, const TileGroup::TileGroupAccess &access,
     llvm::Value *tid_start, llvm::Value *tid_end,
@@ -208,80 +216,24 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
   RowBatch batch{compilation_ctx, tile_group_id_,   tid_start,
                  tid_end,         selection_vector, true};
 
-  // First, check if the predicate is SIMDable
-  const auto *predicate = GetPredicate();
-  LOG_DEBUG("Is Predicate SIMDable : %d", predicate->IsSIMDable());
-  // Determine the attributes the predicate needs
-  std::unordered_set<const planner::AttributeInfo *> used_attributes;
-  predicate->GetUsedAttributes(used_attributes);
+  const auto &simd_predicates = GetSIMDPredicates();
+  const auto *non_simd_predicate = GetNonSIMDPredicate();
 
-  // Setup the row batch with attribute accessors for the predicate
-  std::vector<AttributeAccess> attribute_accessors;
-  for (const auto *ai : used_attributes) {
-    attribute_accessors.emplace_back(access, ai);
-  }
-  for (uint32_t i = 0; i < attribute_accessors.size(); i++) {
-    auto &accessor = attribute_accessors[i];
-    batch.AddAttribute(accessor.GetAttributeRef(), &accessor);
-  }
+  for (auto &simd_predicate : simd_predicates) {
+    // Determine the attributes the predicate needs
+    std::unordered_set<const planner::AttributeInfo *> used_attributes;
+    simd_predicate->GetUsedAttributes(used_attributes);
 
-  bool is_simple_cmp = false;
-  if (auto *cmp_exp = dynamic_cast<const expression::ComparisonExpression *>(predicate)) {
-    auto type = cmp_exp->GetExpressionType();
-    switch (type) {
-      case ExpressionType::COMPARE_EQUAL:
-      case ExpressionType::COMPARE_NOTEQUAL:
-      case ExpressionType::COMPARE_LESSTHAN:
-      case ExpressionType::COMPARE_GREATERTHAN:
-      case ExpressionType::COMPARE_LESSTHANOREQUALTO:
-      case ExpressionType::COMPARE_GREATERTHANOREQUALTO: {
-        auto *lhs = cmp_exp->GetChild(0);
-        auto *rhs = cmp_exp->GetChild(1);
-        auto lhs_typ = lhs->GetValueType();
-        auto rhs_typ = rhs->GetValueType();
-        if ((lhs_typ == peloton::type::TypeId::BOOLEAN ||
-             lhs_typ == peloton::type::TypeId::TINYINT ||
-             lhs_typ == peloton::type::TypeId::SMALLINT ||
-             lhs_typ == peloton::type::TypeId::INTEGER ||
-             lhs_typ == peloton::type::TypeId::BIGINT ||
-             lhs_typ == peloton::type::TypeId::DECIMAL ||
-             lhs_typ == peloton::type::TypeId::TIMESTAMP ||
-             lhs_typ == peloton::type::TypeId::DATE) &&
-            (rhs_typ == peloton::type::TypeId::BOOLEAN ||
-             rhs_typ == peloton::type::TypeId::TINYINT ||
-             rhs_typ == peloton::type::TypeId::SMALLINT ||
-             rhs_typ == peloton::type::TypeId::INTEGER ||
-             rhs_typ == peloton::type::TypeId::BIGINT ||
-             rhs_typ == peloton::type::TypeId::DECIMAL ||
-             rhs_typ == peloton::type::TypeId::TIMESTAMP ||
-             rhs_typ == peloton::type::TypeId::DATE)) {
-          if ((dynamic_cast<const expression::ConstantValueExpression *>(lhs) ||
-               dynamic_cast<const expression::TupleValueExpression *>(lhs)) &&
-              (dynamic_cast<const expression::ConstantValueExpression *>(rhs) ||
-               dynamic_cast<const expression::TupleValueExpression *>(rhs))) {
-            is_simple_cmp = true;
-          }
-        }
-        break;
-      }
-      default:;
+    // Setup the row batch with attribute accessors for the predicate
+    std::vector<AttributeAccess> attribute_accessors;
+    for (const auto *ai : used_attributes) {
+      attribute_accessors.emplace_back(access, ai);
     }
-  }
+    for (uint32_t i = 0; i < attribute_accessors.size(); i++) {
+      auto &accessor = attribute_accessors[i];
+      batch.AddAttribute(accessor.GetAttributeRef(), &accessor);
+    }
 
-  if (!is_simple_cmp) {
-    // Iterate over the batch using a scalar loop
-    batch.Iterate(codegen, [&](RowBatch::Row &row) {
-      // Evaluate the predicate to determine row validity
-      codegen::Value valid_row = row.DeriveValue(codegen, *predicate);
-
-      // Reify the boolean value since it may be NULL
-      PELOTON_ASSERT(valid_row.GetType().GetSqlType() == type::Boolean::Instance());
-      llvm::Value *bool_val = type::Boolean::Instance().Reify(codegen, valid_row);
-
-      // Set the validity of the row
-      row.SetValidity(codegen, bool_val);
-    });
-  } else {
     uint32_t N = 32;
 
     auto *orig_size = selection_vector.GetNumElements();
@@ -294,8 +246,8 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
       llvm::Value *lhs = nullptr;
       llvm::Value *rhs = nullptr;
 
-      auto *lch = predicate->GetChild(0);
-      auto *rch = predicate->GetChild(1);
+      auto *lch = simd_predicate->GetChild(0);
+      auto *rch = simd_predicate->GetChild(1);
 
       auto typ_lch = type::Type(lch->GetValueType(), false);
       auto typ_rch = type::Type(rch->GetValueType(), false);
@@ -325,7 +277,7 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
       codegen::Value val_lhs(cast_lch, lhs);
       codegen::Value val_rhs(cast_rch, rhs);
 
-      auto *cmp_exp = dynamic_cast<const expression::ComparisonExpression *>(predicate);
+      auto *cmp_exp = static_cast<const expression::ComparisonExpression *>(simd_predicate.get());
       llvm::Value *comp = nullptr;
       switch (cmp_exp->GetExpressionType()) {
         case ExpressionType::COMPARE_EQUAL:
@@ -378,7 +330,7 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
     {
       RowBatch::OutputTracker tracker{batch.GetSelectionVector(), write_pos};
       RowBatch::Row row = batch.GetRowAt(idx_cur, &tracker);
-      codegen::Value valid_row = row.DeriveValue(codegen, *predicate);
+      codegen::Value valid_row = row.DeriveValue(codegen, *simd_predicate);
       PELOTON_ASSERT(valid_row.GetType().GetSqlType() == type::Boolean::Instance());
       llvm::Value *bool_val = type::Boolean::Instance().Reify(codegen, valid_row);
       row.SetValidity(codegen, bool_val);
@@ -389,6 +341,35 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
 
     codegen->SetInsertPoint(end_post_batch_bb);
     batch.UpdateWritePosition(write_pos);
+  }
+
+  if (non_simd_predicate != nullptr) {
+    // Determine the attributes the predicate needs
+    std::unordered_set<const planner::AttributeInfo *> used_attributes;
+    non_simd_predicate->GetUsedAttributes(used_attributes);
+
+    // Setup the row batch with attribute accessors for the predicate
+    std::vector<AttributeAccess> attribute_accessors;
+    for (const auto *ai : used_attributes) {
+      attribute_accessors.emplace_back(access, ai);
+    }
+    for (uint32_t i = 0; i < attribute_accessors.size(); i++) {
+      auto &accessor = attribute_accessors[i];
+      batch.AddAttribute(accessor.GetAttributeRef(), &accessor);
+    }
+
+    // Iterate over the batch using a scalar loop
+    batch.Iterate(codegen, [&](RowBatch::Row &row) {
+      // Evaluate the predicate to determine row validity
+      codegen::Value valid_row = row.DeriveValue(codegen, *non_simd_predicate);
+
+      // Reify the boolean value since it may be NULL
+      PELOTON_ASSERT(valid_row.GetType().GetSqlType() == type::Boolean::Instance());
+      llvm::Value *bool_val = type::Boolean::Instance().Reify(codegen, valid_row);
+
+      // Set the validity of the row
+      row.SetValidity(codegen, bool_val);
+    });
   }
 }
 
