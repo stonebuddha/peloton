@@ -233,6 +233,9 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
   }
 
   for (auto &simd_predicate : simd_predicates) {
+    LOG_DEBUG("SIMD predicate detected");
+    LOG_DEBUG("%s", simd_predicate->GetInfo().c_str());
+
     // The batch we're filtering
     RowBatch batch{compilation_ctx, tile_group_id_,   tid_start,
                    tid_end,         selection_vector, true};
