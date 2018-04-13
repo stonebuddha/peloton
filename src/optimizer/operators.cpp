@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "optimizer/util.h"
 #include "optimizer/operators.h"
 #include "optimizer/operator_visitor.h"
 #include "expression/expression_util.h"
@@ -51,7 +52,7 @@ hash_t LogicalGet::Hash() const {
 }
 
 bool LogicalGet::operator==(const BaseOperatorNode &r) {
-  if (r.GetType()!= OpType::Get) return false;
+  if (r.GetType() != OpType::Get) return false;
   const LogicalGet &node = *static_cast<const LogicalGet *>(&r);
   if (predicates.size() != node.predicates.size()) return false;
   for (size_t i = 0; i < predicates.size(); i++) {
@@ -385,8 +386,8 @@ Operator LogicalDelete::make(
 //===--------------------------------------------------------------------===//
 Operator LogicalUpdate::make(
     std::shared_ptr<catalog::TableCatalogObject> target_table,
-    const std::vector<std::unique_ptr<peloton::parser::UpdateClause>>
-        *updates) {
+    const std::vector<std::unique_ptr<peloton::parser::UpdateClause>> *
+        updates) {
   LogicalUpdate *update_op = new LogicalUpdate;
   update_op->target_table = target_table;
   update_op->updates = updates;
@@ -426,13 +427,19 @@ Operator PhysicalSeqScan::make(
     oid_t get_id, std::shared_ptr<catalog::TableCatalogObject> table,
     std::string alias, std::vector<AnnotatedExpression> predicates,
     bool update) {
-  assert(table != nullptr);
+  PELOTON_ASSERT(table != nullptr);
   PhysicalSeqScan *scan = new PhysicalSeqScan;
   scan->table_ = table;
   scan->table_alias = alias;
   scan->predicates = std::move(predicates);
   scan->is_for_update = update;
   scan->get_id = get_id;
+
+  LOG_WARN("hahaha");
+
+  // Identify the SIMD and non-SIMD instructions in the predicates
+  util::IdentifySIMDPredicates(scan->predicates, scan->simd_predicates_,
+                               scan->non_simd_predicates_);
 
   return Operator(scan);
 }
@@ -465,7 +472,7 @@ Operator PhysicalIndexScan::make(
     oid_t index_id, std::vector<oid_t> key_column_id_list,
     std::vector<ExpressionType> expr_type_list,
     std::vector<type::Value> value_list) {
-  assert(table != nullptr);
+  PELOTON_ASSERT(table != nullptr);
   PhysicalIndexScan *scan = new PhysicalIndexScan;
   scan->table_ = table;
   scan->is_for_update = update;
@@ -748,8 +755,8 @@ Operator PhysicalDelete::make(
 //===--------------------------------------------------------------------===//
 Operator PhysicalUpdate::make(
     std::shared_ptr<catalog::TableCatalogObject> target_table,
-    const std::vector<std::unique_ptr<peloton::parser::UpdateClause>>
-        *updates) {
+    const std::vector<std::unique_ptr<peloton::parser::UpdateClause>> *
+        updates) {
   PhysicalUpdate *update = new PhysicalUpdate;
   update->target_table = target_table;
   update->updates = updates;

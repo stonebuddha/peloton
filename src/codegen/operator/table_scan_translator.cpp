@@ -54,6 +54,12 @@ TableScanTranslator::TableScanTranslator(const planner::SeqScanPlan &scan,
       pipeline.InstallBoundaryAtOutput(this);
     }
   }
+
+  const auto *non_simd_predicate = GetScanPlan().GetNonSIMDPredicate();
+  if (non_simd_predicate != nullptr) {
+    context.Prepare(*non_simd_predicate);
+  }
+
   LOG_DEBUG("Finished constructing TableScanTranslator ...");
 }
 
@@ -199,6 +205,14 @@ TableScanTranslator::ScanConsumer::GetPredicate() const {
   return translator_.GetScanPlan().GetPredicate();
 }
 
+const std::vector<std::unique_ptr<expression::AbstractExpression>>& TableScanTranslator::ScanConsumer::GetSIMDPredicates() const {
+  return translator_.GetScanPlan().GetSIMDPredicates();
+}
+
+const expression::AbstractExpression* TableScanTranslator::ScanConsumer::GetNonSIMDPredicate() const {
+  return translator_.GetScanPlan().GetNonSIMDPredicate();
+}
+
 void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
     CodeGen &codegen, const TileGroup::TileGroupAccess &access,
     llvm::Value *tid_start, llvm::Value *tid_end,
@@ -208,80 +222,29 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
   RowBatch batch{compilation_ctx, tile_group_id_,   tid_start,
                  tid_end,         selection_vector, true};
 
-  // First, check if the predicate is SIMDable
-  const auto *predicate = GetPredicate();
-  LOG_DEBUG("Is Predicate SIMDable : %d", predicate->IsSIMDable());
-  // Determine the attributes the predicate needs
-  std::unordered_set<const planner::AttributeInfo *> used_attributes;
-  predicate->GetUsedAttributes(used_attributes);
+  const auto &simd_predicates = GetSIMDPredicates();
+  const auto *non_simd_predicate = GetNonSIMDPredicate();
 
-  // Setup the row batch with attribute accessors for the predicate
-  std::vector<AttributeAccess> attribute_accessors;
-  for (const auto *ai : used_attributes) {
-    attribute_accessors.emplace_back(access, ai);
-  }
-  for (uint32_t i = 0; i < attribute_accessors.size(); i++) {
-    auto &accessor = attribute_accessors[i];
-    batch.AddAttribute(accessor.GetAttributeRef(), &accessor);
+  if (simd_predicates.empty() && non_simd_predicate == nullptr) {
+    non_simd_predicate = GetPredicate();
   }
 
-  bool is_simple_cmp = false;
-  if (auto *cmp_exp = dynamic_cast<const expression::ComparisonExpression *>(predicate)) {
-    auto type = cmp_exp->GetExpressionType();
-    switch (type) {
-      case ExpressionType::COMPARE_EQUAL:
-      case ExpressionType::COMPARE_NOTEQUAL:
-      case ExpressionType::COMPARE_LESSTHAN:
-      case ExpressionType::COMPARE_GREATERTHAN:
-      case ExpressionType::COMPARE_LESSTHANOREQUALTO:
-      case ExpressionType::COMPARE_GREATERTHANOREQUALTO: {
-        auto *lhs = cmp_exp->GetChild(0);
-        auto *rhs = cmp_exp->GetChild(1);
-        auto lhs_typ = lhs->GetValueType();
-        auto rhs_typ = rhs->GetValueType();
-        if ((lhs_typ == peloton::type::TypeId::BOOLEAN ||
-             lhs_typ == peloton::type::TypeId::TINYINT ||
-             lhs_typ == peloton::type::TypeId::SMALLINT ||
-             lhs_typ == peloton::type::TypeId::INTEGER ||
-             lhs_typ == peloton::type::TypeId::BIGINT ||
-             lhs_typ == peloton::type::TypeId::DECIMAL ||
-             lhs_typ == peloton::type::TypeId::TIMESTAMP ||
-             lhs_typ == peloton::type::TypeId::DATE) &&
-            (rhs_typ == peloton::type::TypeId::BOOLEAN ||
-             rhs_typ == peloton::type::TypeId::TINYINT ||
-             rhs_typ == peloton::type::TypeId::SMALLINT ||
-             rhs_typ == peloton::type::TypeId::INTEGER ||
-             rhs_typ == peloton::type::TypeId::BIGINT ||
-             rhs_typ == peloton::type::TypeId::DECIMAL ||
-             rhs_typ == peloton::type::TypeId::TIMESTAMP ||
-             rhs_typ == peloton::type::TypeId::DATE)) {
-          if ((dynamic_cast<const expression::ConstantValueExpression *>(lhs) ||
-               dynamic_cast<const expression::TupleValueExpression *>(lhs)) &&
-              (dynamic_cast<const expression::ConstantValueExpression *>(rhs) ||
-               dynamic_cast<const expression::TupleValueExpression *>(rhs))) {
-            is_simple_cmp = true;
-          }
-        }
-        break;
-      }
-      default:;
+  for (auto &simd_predicate : simd_predicates) {
+    // Determine the attributes the predicate needs
+    std::unordered_set<const planner::AttributeInfo *> used_attributes;
+    simd_predicate->GetUsedAttributes(used_attributes);
+    LOG_DEBUG("SIMD predicate detected");
+
+    // Setup the row batch with attribute accessors for the predicate
+    std::vector<AttributeAccess> attribute_accessors;
+    for (const auto *ai : used_attributes) {
+      attribute_accessors.emplace_back(access, ai);
     }
-  }
+    for (uint32_t i = 0; i < attribute_accessors.size(); i++) {
+      auto &accessor = attribute_accessors[i];
+      batch.AddAttribute(accessor.GetAttributeRef(), &accessor);
+    }
 
-  if (!is_simple_cmp) {
-    // Iterate over the batch using a scalar loop
-    batch.Iterate(codegen, [&](RowBatch::Row &row) {
-      // Evaluate the predicate to determine row validity
-      codegen::Value valid_row = row.DeriveValue(codegen, *predicate);
-
-      // Reify the boolean value since it may be NULL
-      PL_ASSERT(valid_row.GetType().GetSqlType() == type::Boolean::Instance());
-      llvm::Value *bool_val = type::Boolean::Instance().Reify(codegen, valid_row);
-
-      // Set the validity of the row
-      row.SetValidity(codegen, bool_val);
-    });
-  } else {
     uint32_t N = 32;
 
     auto *orig_size = selection_vector.GetNumElements();
@@ -294,37 +257,38 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
       llvm::Value *lhs = nullptr;
       llvm::Value *rhs = nullptr;
 
-      auto *lch = predicate->GetChild(0);
-      auto *rch = predicate->GetChild(1);
+      auto *lch = simd_predicate->GetChild(0);
+      auto *rch = simd_predicate->GetChild(1);
 
       auto typ_lch = type::Type(lch->GetValueType(), false);
       auto typ_rch = type::Type(rch->GetValueType(), false);
-      llvm::Type *dummy, *typ_lhs, *typ_rhs;
 
-      typ_lch.GetSqlType().GetTypeForMaterialization(codegen, typ_lhs, dummy);
-      typ_rch.GetSqlType().GetTypeForMaterialization(codegen, typ_rhs, dummy);
+      auto cast_lch = typ_lch;
+      auto cast_rch = typ_rch;
+      type::TypeSystem::GetComparison(typ_lch, cast_lch, typ_rch, cast_rch);
+
+      llvm::Type *dummy, *typ_lhs, *typ_rhs;
+      cast_lch.GetSqlType().GetTypeForMaterialization(codegen, typ_lhs, dummy);
+      cast_rch.GetSqlType().GetTypeForMaterialization(codegen, typ_rhs, dummy);
 
       lhs = llvm::UndefValue::get(llvm::VectorType::get(typ_lhs, N));
       rhs = llvm::UndefValue::get(llvm::VectorType::get(typ_rhs, N));
-
-      auto *cmp_exp = dynamic_cast<const expression::ComparisonExpression *>(predicate);
-
       for (uint32_t i = 0; i < N; ++i) {
         RowBatch::Row row = batch.GetRowAt(codegen->CreateAdd(ins.start, codegen.Const32(i)));
         codegen::Value eval_row = row.DeriveValue(codegen, *lch);
-        llvm::Value *int_val = eval_row.GetValue();
-        lhs = codegen->CreateInsertElement(lhs, int_val, i);
+        llvm::Value *ins_val = eval_row.CastTo(codegen, cast_lch).GetValue();
+        lhs = codegen->CreateInsertElement(lhs, ins_val, i);
       }
       for (uint32_t i = 0; i < N; ++i) {
         RowBatch::Row row = batch.GetRowAt(codegen->CreateAdd(ins.start, codegen.Const32(i)));
         codegen::Value eval_row = row.DeriveValue(codegen, *rch);
-        llvm::Value *int_val = eval_row.GetValue();
-        rhs = codegen->CreateInsertElement(rhs, int_val, i);
+        llvm::Value *ins_val = eval_row.CastTo(codegen, cast_rch).GetValue();
+        rhs = codegen->CreateInsertElement(rhs, ins_val, i);
       }
+      codegen::Value val_lhs(cast_lch, lhs);
+      codegen::Value val_rhs(cast_rch, rhs);
 
-      codegen::Value val_lhs(typ_lch, lhs);
-      codegen::Value val_rhs(typ_rch, rhs);
-
+      auto *cmp_exp = static_cast<const expression::ComparisonExpression *>(simd_predicate.get());
       llvm::Value *comp = nullptr;
       switch (cmp_exp->GetExpressionType()) {
         case ExpressionType::COMPARE_EQUAL:
@@ -377,8 +341,8 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
     {
       RowBatch::OutputTracker tracker{batch.GetSelectionVector(), write_pos};
       RowBatch::Row row = batch.GetRowAt(idx_cur, &tracker);
-      codegen::Value valid_row = row.DeriveValue(codegen, *predicate);
-      PL_ASSERT(valid_row.GetType().GetSqlType() == type::Boolean::Instance());
+      codegen::Value valid_row = row.DeriveValue(codegen, *simd_predicate);
+      PELOTON_ASSERT(valid_row.GetType().GetSqlType() == type::Boolean::Instance());
       llvm::Value *bool_val = type::Boolean::Instance().Reify(codegen, valid_row);
       row.SetValidity(codegen, bool_val);
       idx_cur->addIncoming(codegen->CreateAdd(idx_cur, codegen.Const32(1)), loop_post_batch_bb);
@@ -388,8 +352,35 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
 
     codegen->SetInsertPoint(end_post_batch_bb);
     batch.UpdateWritePosition(write_pos);
+  }
 
-    // codegen->GetInsertBlock()->getParent()->dump();
+  if (non_simd_predicate != nullptr) {
+    // Determine the attributes the predicate needs
+    std::unordered_set<const planner::AttributeInfo *> used_attributes;
+    non_simd_predicate->GetUsedAttributes(used_attributes);
+
+    // Setup the row batch with attribute accessors for the predicate
+    std::vector<AttributeAccess> attribute_accessors;
+    for (const auto *ai : used_attributes) {
+      attribute_accessors.emplace_back(access, ai);
+    }
+    for (uint32_t i = 0; i < attribute_accessors.size(); i++) {
+      auto &accessor = attribute_accessors[i];
+      batch.AddAttribute(accessor.GetAttributeRef(), &accessor);
+    }
+
+    // Iterate over the batch using a scalar loop
+    batch.Iterate(codegen, [&](RowBatch::Row &row) {
+      // Evaluate the predicate to determine row validity
+      codegen::Value valid_row = row.DeriveValue(codegen, *non_simd_predicate);
+
+      // Reify the boolean value since it may be NULL
+      PELOTON_ASSERT(valid_row.GetType().GetSqlType() == type::Boolean::Instance());
+      llvm::Value *bool_val = type::Boolean::Instance().Reify(codegen, valid_row);
+
+      // Set the validity of the row
+      row.SetValidity(codegen, bool_val);
+    });
   }
 }
 
