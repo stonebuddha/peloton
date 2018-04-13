@@ -219,10 +219,15 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
   const auto &simd_predicates = GetSIMDPredicates();
   const auto *non_simd_predicate = GetNonSIMDPredicate();
 
+  if (simd_predicates.empty() && non_simd_predicate == nullptr) {
+    non_simd_predicate = GetPredicate();
+  }
+
   for (auto &simd_predicate : simd_predicates) {
     // Determine the attributes the predicate needs
     std::unordered_set<const planner::AttributeInfo *> used_attributes;
     simd_predicate->GetUsedAttributes(used_attributes);
+    LOG_DEBUG("SIMD predicate detected");
 
     // Setup the row batch with attribute accessors for the predicate
     std::vector<AttributeAccess> attribute_accessors;
