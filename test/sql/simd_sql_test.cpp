@@ -28,118 +28,149 @@ using std::unique_ptr;
 using std::shared_ptr;
 
 namespace peloton {
-  namespace test {
+namespace test {
 
-    class SIMDSQLTests : public PelotonTest {
-    protected:
-      virtual void SetUp() override {
-        // Call parent virtual function first
-        PelotonTest::SetUp();
+class SIMDSQLTests : public PelotonTest {
+ protected:
+  virtual void SetUp() override {
+    // Call parent virtual function first
+    PelotonTest::SetUp();
 
-        // Create test database
-        CreateAndLoadTable();
-        optimizer.reset(new optimizer::Optimizer());
-      }
+    // Create test database
+    CreateAndLoadTable();
+    optimizer.reset(new optimizer::Optimizer());
+  }
 
-      virtual void TearDown() override {
-        // Destroy test database
-        auto &txn_manager = concurrency::TransactionManagerFactory::GetInstance();
-        auto txn = txn_manager.BeginTransaction();
-        catalog::Catalog::GetInstance()->DropDatabaseWithName(DEFAULT_DB_NAME, txn);
-        txn_manager.CommitTransaction(txn);
+  virtual void TearDown() override {
+    // Destroy test database
+    auto &txn_manager = concurrency::TransactionManagerFactory::GetInstance();
+    auto txn = txn_manager.BeginTransaction();
+    catalog::Catalog::GetInstance()->DropDatabaseWithName(DEFAULT_DB_NAME, txn);
+    txn_manager.CommitTransaction(txn);
 
-        // Call parent virtual function
-        PelotonTest::TearDown();
-      }
+    // Call parent virtual function
+    PelotonTest::TearDown();
+  }
 
-      /*** Helper functions **/
-      void CreateAndLoadTable() {
-        // Create database
-        auto &txn_manager = concurrency::TransactionManagerFactory::GetInstance();
-        auto txn = txn_manager.BeginTransaction();
-        catalog::Catalog::GetInstance()->CreateDatabase(DEFAULT_DB_NAME, txn);
-        txn_manager.CommitTransaction(txn);
+  /*** Helper functions **/
+  void CreateAndLoadTable() {
+    // Create database
+    auto &txn_manager = concurrency::TransactionManagerFactory::GetInstance();
+    auto txn = txn_manager.BeginTransaction();
+    catalog::Catalog::GetInstance()->CreateDatabase(DEFAULT_DB_NAME, txn);
+    txn_manager.CommitTransaction(txn);
 
-        // Create a table first
-        TestingSQLUtil::ExecuteSQLQuery(
-            "CREATE TABLE test(a INT PRIMARY KEY, b INT, c INT);");
+    // Create a table first
+    TestingSQLUtil::ExecuteSQLQuery("CREATE TABLE test(a INT , b INT, c INT);");
 
-        // Insert tuples into table
-        int N = 1000;
-        for (int i = 0; i < N; ++i) {
-          std::stringstream ss;
-          ss << "INSERT INTO test VALUES (";
-          ss << i << ", ";
-          ss << i * 11 << ", ";
-          ss << 5 * i - 2 << ");";
-          TestingSQLUtil::ExecuteSQLQuery(ss.str());
-        }
-        LOG_DEBUG("Loading done");
-      }
+    // Insert tuples into table
+    uint32_t N = 1000000;
+    txn = txn_manager.BeginTransaction();
+    auto *catalog = catalog::Catalog::GetInstance();
+    auto test_db = catalog->GetDatabaseWithName(DEFAULT_DB_NAME, txn);
+    auto test_table = test_db->GetTableWithName("test");
+    auto *table_schema = test_table->GetSchema();
 
-      // If the query has OrderBy, the result is deterministic. Specify ordered to
-      // be true. Otherwise, specify ordered to be false
-      void TestUtil(string query, vector<string> ref_result, bool ordered,
-                    vector<PlanNodeType> expected_plans = {}) {
-        LOG_DEBUG("Running Query \"%s\"", query.c_str());
-
-        // Check Plan Nodes are correct if provided
-        if (expected_plans.size() > 0) {
-          auto &txn_manager = concurrency::TransactionManagerFactory::GetInstance();
-          auto txn = txn_manager.BeginTransaction(0, IsolationLevelType::READ_ONLY);
-          auto plan =
-              TestingSQLUtil::GeneratePlanWithOptimizer(optimizer, query, txn);
-          txn_manager.CommitTransaction(txn);
-
-          auto plan_ptr = plan.get();
-          vector<PlanNodeType> actual_plans;
-          while (true) {
-            actual_plans.push_back(plan_ptr->GetPlanNodeType());
-            if (plan_ptr->GetChildren().size() == 0) break;
-            plan_ptr = plan_ptr->GetChildren()[0].get();
-          }
-          EXPECT_EQ(expected_plans, actual_plans);
-        }
-        LOG_INFO("Before Exec with Opt");
-        // Check plan execution results are correct
-        TestingSQLUtil::ExecuteSQLQueryWithOptimizer(optimizer, query, result,
-                                                     tuple_descriptor, rows_changed,
-                                                     error_message);
-        LOG_INFO("After Exec with Opt");
-        vector<string> actual_result;
-        for (unsigned i = 0; i < result.size(); i++)
-          actual_result.push_back(
-              TestingSQLUtil::GetResultValueAsString(result, i));
-
-        EXPECT_EQ(ref_result.size(), result.size());
-        if (ordered) {
-          // If deterministic, do comparision with expected result in order
-          EXPECT_EQ(ref_result, actual_result);
-        } else {
-          // If non-deterministic, make sure they have the same set of value
-          unordered_set<string> ref_set(ref_result.begin(), ref_result.end());
-          for (auto &result_str : actual_result) {
-            if (ref_set.count(result_str) == 0) {
-              // Test Failed. Print both actual results and ref results
-              EXPECT_EQ(ref_result, actual_result);
-              break;
-            }
-          }
-        }
-      }
-
-    protected:
-      unique_ptr<optimizer::AbstractOptimizer> optimizer;
-      vector<ResultValue> result;
-      vector<FieldInfo> tuple_descriptor;
-      string error_message;
-      int rows_changed;
+    auto col_val = [](uint32_t tuple_id, uint32_t col_id) {
+      return 10 * tuple_id + col_id;
     };
 
-    TEST_F(SIMDSQLTests, SimpleSelectTest) {
-      // Testing predicate
-      TestUtil("SELECT c, a from test where b=22", {"8", "2"}, false);
+    const bool allocate = true;
+    for (uint32_t rowid = 0; rowid < N; rowid++) {
+      // The input tuple
+      storage::Tuple tuple{table_schema, allocate};
+
+      tuple.SetValue(0, type::ValueFactory::GetIntegerValue(col_val(rowid, 0)));
+      tuple.SetValue(1, type::ValueFactory::GetIntegerValue(col_val(rowid, 1)));
+      tuple.SetValue(2, type::ValueFactory::GetDecimalValue(col_val(rowid, 2)));
+
+      ItemPointer *index_entry_ptr = nullptr;
+      ItemPointer tuple_slot_id =
+          test_table->InsertTuple(&tuple, txn, &index_entry_ptr);
+      PELOTON_ASSERT(tuple_slot_id.block != INVALID_OID);
+      PELOTON_ASSERT(tuple_slot_id.offset != INVALID_OID);
+
+      auto &txn_manager = concurrency::TransactionManagerFactory::GetInstance();
+      txn_manager.PerformInsert(txn, tuple_slot_id, index_entry_ptr);
     }
+
+    txn_manager.CommitTransaction(txn);
+
+    /*
+    for (int i = 0; i < N; ++i) {
+      std::stringstream ss;
+      ss << "INSERT INTO test VALUES (";
+      ss << i << ", ";
+      ss << i * 11 << ", ";
+      ss << 5 * i - 2 << ");";
+      TestingSQLUtil::ExecuteSQLQuery(ss.str());
+    }*/
+    LOG_INFO("Loading done");
+  }
+
+  // If the query has OrderBy, the result is deterministic. Specify ordered to
+  // be true. Otherwise, specify ordered to be false
+  void TestUtil(string query, vector<string> ref_result, bool ordered,
+                vector<PlanNodeType> expected_plans = {}) {
+    LOG_DEBUG("Running Query \"%s\"", query.c_str());
+
+    // Check Plan Nodes are correct if provided
+    if (expected_plans.size() > 0) {
+      auto &txn_manager = concurrency::TransactionManagerFactory::GetInstance();
+      auto txn = txn_manager.BeginTransaction(0, IsolationLevelType::READ_ONLY);
+      auto plan =
+          TestingSQLUtil::GeneratePlanWithOptimizer(optimizer, query, txn);
+      txn_manager.CommitTransaction(txn);
+
+      auto plan_ptr = plan.get();
+      vector<PlanNodeType> actual_plans;
+      while (true) {
+        actual_plans.push_back(plan_ptr->GetPlanNodeType());
+        if (plan_ptr->GetChildren().size() == 0) break;
+        plan_ptr = plan_ptr->GetChildren()[0].get();
+      }
+      EXPECT_EQ(expected_plans, actual_plans);
+    }
+    LOG_INFO("Before Exec with Opt");
+    // Check plan execution results are correct
+    TestingSQLUtil::ExecuteSQLQueryWithOptimizer(optimizer, query, result,
+                                                 tuple_descriptor, rows_changed,
+                                                 error_message);
+    LOG_INFO("After Exec with Opt");
+    vector<string> actual_result;
+    for (unsigned i = 0; i < result.size(); i++)
+      actual_result.push_back(
+          TestingSQLUtil::GetResultValueAsString(result, i));
+
+    EXPECT_EQ(ref_result.size(), result.size());
+    if (ordered) {
+      // If deterministic, do comparision with expected result in order
+      EXPECT_EQ(ref_result, actual_result);
+    } else {
+      // If non-deterministic, make sure they have the same set of value
+      unordered_set<string> ref_set(ref_result.begin(), ref_result.end());
+      for (auto &result_str : actual_result) {
+        if (ref_set.count(result_str) == 0) {
+          // Test Failed. Print both actual results and ref results
+          EXPECT_EQ(ref_result, actual_result);
+          break;
+        }
+      }
+    }
+  }
+
+ protected:
+  unique_ptr<optimizer::AbstractOptimizer> optimizer;
+  vector<ResultValue> result;
+  vector<FieldInfo> tuple_descriptor;
+  string error_message;
+  int rows_changed;
+};
+
+TEST_F(SIMDSQLTests, SimpleSelectTest) {
+  // Testing predicate
+  TestUtil("SELECT c, a from test where b=21", {"22", "20"}, false);
+}
 
 #if 0
     TEST_F(OptimizerSQLTests, SelectOrderByTest) {
@@ -785,5 +816,5 @@ namespace peloton {
     }
 #endif
 
-  }  // namespace test
+}  // namespace test
 }  // namespace peloton

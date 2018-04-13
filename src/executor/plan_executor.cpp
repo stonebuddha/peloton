@@ -65,7 +65,7 @@ static void CompileAndExecutePlan(
   }
 
   auto on_query_result =
-    [&on_complete, &consumer, plan](executor::ExecutionResult result) {
+      [&on_complete, &consumer, plan](executor::ExecutionResult result) {
         std::vector<ResultValue> values;
         for (const auto &tuple : consumer.GetOutputTuples()) {
           for (uint32_t i = 0; i < tuple.tuple_.size(); i++) {
@@ -83,7 +83,7 @@ static void CompileAndExecutePlan(
   timer.Start();
   query->Execute(std::move(executor_context), consumer, on_query_result);
   timer.Stop();
-  LOG_DEBUG("Time of query execution: %lf", timer.GetDuration());
+  LOG_INFO("Time of query execution: %lf", timer.GetDuration());
 }
 
 static void InterpretPlan(
