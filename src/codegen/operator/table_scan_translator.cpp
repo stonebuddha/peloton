@@ -288,7 +288,8 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
       cast_lch.GetSqlType().GetTypeForMaterialization(codegen, typ_lhs, dummy);
       cast_rch.GetSqlType().GetTypeForMaterialization(codegen, typ_rhs, dummy);
 
-      if (auto *const_exp = dynamic_cast<const expression::ConstantValueExpression *>(lch)) {
+      if (dynamic_cast<const expression::ConstantValueExpression *>(lch) !=
+          nullptr) {
         RowBatch::Row row = batch.GetRowAt(ins.start);
         codegen::Value eval_row = row.DeriveValue(codegen, *lch);
         llvm::Value *ins_val = eval_row.CastTo(codegen, cast_lch).GetValue();
@@ -304,7 +305,8 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
         }
       }
 
-      if (auto *const_exp = dynamic_cast<const expression::ConstantValueExpression *>(rch)) {
+      if (dynamic_cast<const expression::ConstantValueExpression *>(rch) !=
+          nullptr) {
         RowBatch::Row row = batch.GetRowAt(ins.start);
         codegen::Value eval_row = row.DeriveValue(codegen, *rch);
         llvm::Value *ins_val = eval_row.CastTo(codegen, cast_rch).GetValue();

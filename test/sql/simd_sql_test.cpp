@@ -61,7 +61,8 @@ class SIMDSQLTests : public PelotonTest {
     txn_manager.CommitTransaction(txn);
 
     // Create a table first
-    TestingSQLUtil::ExecuteSQLQuery("CREATE TABLE test(a INT , b DECIMAL, c DECIMAL);");
+    TestingSQLUtil::ExecuteSQLQuery(
+        "CREATE TABLE test(a INT , b DECIMAL, c DECIMAL);");
 
     // Insert tuples into table
     uint32_t N = 10000000;
@@ -96,15 +97,6 @@ class SIMDSQLTests : public PelotonTest {
 
     txn_manager.CommitTransaction(txn);
 
-    /*
-    for (int i = 0; i < N; ++i) {
-      std::stringstream ss;
-      ss << "INSERT INTO test VALUES (";
-      ss << i << ", ";
-      ss << i * 11 << ", ";
-      ss << 5 * i - 2 << ");";
-      TestingSQLUtil::ExecuteSQLQuery(ss.str());
-    }*/
     LOG_INFO("Loading done");
   }
 
@@ -169,7 +161,11 @@ class SIMDSQLTests : public PelotonTest {
 
 TEST_F(SIMDSQLTests, SimpleSelectTest) {
   // Testing predicate
-  TestUtil("SELECT c, a from test where b=21", {"22", "20"}, false);
+  TestUtil(
+      //"SELECT c, a from test where b=21",
+      "SELECT c, a from test where a<70 and b=21",
+      //"SELECT c, a from test where b=21 and a<70 and c>15 and b>7",
+      {"22", "20"}, false);
 }
 
 #if 0
