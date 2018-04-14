@@ -288,22 +288,38 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
       cast_lch.GetSqlType().GetTypeForMaterialization(codegen, typ_lhs, dummy);
       cast_rch.GetSqlType().GetTypeForMaterialization(codegen, typ_rhs, dummy);
 
-      lhs = llvm::UndefValue::get(llvm::VectorType::get(typ_lhs, N));
-      rhs = llvm::UndefValue::get(llvm::VectorType::get(typ_rhs, N));
-      for (uint32_t i = 0; i < N; ++i) {
-        RowBatch::Row row =
-            batch.GetRowAt(codegen->CreateAdd(ins.start, codegen.Const32(i)));
+      if (auto *const_exp = dynamic_cast<const expression::ConstantValueExpression *>(lch)) {
+        RowBatch::Row row = batch.GetRowAt(ins.start);
         codegen::Value eval_row = row.DeriveValue(codegen, *lch);
         llvm::Value *ins_val = eval_row.CastTo(codegen, cast_lch).GetValue();
-        lhs = codegen->CreateInsertElement(lhs, ins_val, i);
+        lhs = codegen->CreateVectorSplat(N, ins_val);
+      } else {
+        lhs = llvm::UndefValue::get(llvm::VectorType::get(typ_lhs, N));
+        for (uint32_t i = 0; i < N; ++i) {
+          RowBatch::Row row =
+              batch.GetRowAt(codegen->CreateAdd(ins.start, codegen.Const32(i)));
+          codegen::Value eval_row = row.DeriveValue(codegen, *lch);
+          llvm::Value *ins_val = eval_row.CastTo(codegen, cast_lch).GetValue();
+          lhs = codegen->CreateInsertElement(lhs, ins_val, i);
+        }
       }
-      for (uint32_t i = 0; i < N; ++i) {
-        RowBatch::Row row =
-            batch.GetRowAt(codegen->CreateAdd(ins.start, codegen.Const32(i)));
+
+      if (auto *const_exp = dynamic_cast<const expression::ConstantValueExpression *>(rch)) {
+        RowBatch::Row row = batch.GetRowAt(ins.start);
         codegen::Value eval_row = row.DeriveValue(codegen, *rch);
         llvm::Value *ins_val = eval_row.CastTo(codegen, cast_rch).GetValue();
-        rhs = codegen->CreateInsertElement(rhs, ins_val, i);
+        rhs = codegen->CreateVectorSplat(N, ins_val);
+      } else {
+        rhs = llvm::UndefValue::get(llvm::VectorType::get(typ_lhs, N));
+        for (uint32_t i = 0; i < N; ++i) {
+          RowBatch::Row row =
+              batch.GetRowAt(codegen->CreateAdd(ins.start, codegen.Const32(i)));
+          codegen::Value eval_row = row.DeriveValue(codegen, *rch);
+          llvm::Value *ins_val = eval_row.CastTo(codegen, cast_rch).GetValue();
+          rhs = codegen->CreateInsertElement(rhs, ins_val, i);
+        }
       }
+
       codegen::Value val_lhs(cast_lch, lhs);
       codegen::Value val_rhs(cast_rch, rhs);
 

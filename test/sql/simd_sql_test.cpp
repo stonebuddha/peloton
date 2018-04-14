@@ -169,7 +169,7 @@ class SIMDSQLTests : public PelotonTest {
 
 TEST_F(SIMDSQLTests, SimpleSelectTest) {
   // Testing predicate
-  TestUtil("SELECT c, a from test where b=c", {"22", "20"}, false);
+  TestUtil("SELECT c, a from test where b=21", {"22", "20"}, false);
 }
 
 #if 0
