@@ -13,6 +13,7 @@
 #pragma once
 
 #include <cstdint>
+#include <chrono>
 
 namespace peloton {
 
@@ -42,6 +43,13 @@ namespace codegen {
 //===----------------------------------------------------------------------===//
 class TransactionRuntime {
  public:
+  static void GetClockStart();
+  static void GetClockPause();
+  static void PrintClockDuration();
+
+  static std::chrono::time_point<std::chrono::high_resolution_clock> time_point;
+  static double duration;
+
   // Perform a read operation for all tuples in the given tile group with IDs
   // in the range [tid_start, tid_end) in the context of the given transaction
   static uint32_t PerformVectorizedRead(concurrency::TransactionContext &txn,

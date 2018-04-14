@@ -22,6 +22,23 @@
 namespace peloton {
 namespace codegen {
 
+double TransactionRuntime::duration = 0.0;
+std::chrono::time_point<std::chrono::high_resolution_clock> TransactionRuntime::time_point;
+
+void TransactionRuntime::GetClockStart() {
+  time_point = std::chrono::high_resolution_clock::now();
+}
+
+void TransactionRuntime::GetClockPause() {
+  auto new_time_point = std::chrono::high_resolution_clock::now();
+  duration += std::chrono::duration_cast<std::chrono::duration<double, std::ratio<1, 1000>>>(new_time_point - time_point)
+      .count();
+}
+
+void TransactionRuntime::PrintClockDuration() {
+  printf("Acc time: %lf\n", duration);
+}
+
 // Perform a read operation for all tuples in the tile group in the given range
 // TODO: Right now, we split this check into two loops: a visibility check and
 //       the actual reading. Can this be merged?

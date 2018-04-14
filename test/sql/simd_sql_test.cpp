@@ -61,10 +61,10 @@ class SIMDSQLTests : public PelotonTest {
     txn_manager.CommitTransaction(txn);
 
     // Create a table first
-    TestingSQLUtil::ExecuteSQLQuery("CREATE TABLE test(a INT , b INT, c INT);");
+    TestingSQLUtil::ExecuteSQLQuery("CREATE TABLE test(a INT , b DECIMAL, c DECIMAL);");
 
     // Insert tuples into table
-    uint32_t N = 1000000;
+    uint32_t N = 10000000;
     txn = txn_manager.BeginTransaction();
     auto *catalog = catalog::Catalog::GetInstance();
     auto test_db = catalog->GetDatabaseWithName(DEFAULT_DB_NAME, txn);
@@ -81,7 +81,7 @@ class SIMDSQLTests : public PelotonTest {
       storage::Tuple tuple{table_schema, allocate};
 
       tuple.SetValue(0, type::ValueFactory::GetIntegerValue(col_val(rowid, 0)));
-      tuple.SetValue(1, type::ValueFactory::GetIntegerValue(col_val(rowid, 1)));
+      tuple.SetValue(1, type::ValueFactory::GetDecimalValue(col_val(rowid, 1)));
       tuple.SetValue(2, type::ValueFactory::GetDecimalValue(col_val(rowid, 2)));
 
       ItemPointer *index_entry_ptr = nullptr;
@@ -169,7 +169,7 @@ class SIMDSQLTests : public PelotonTest {
 
 TEST_F(SIMDSQLTests, SimpleSelectTest) {
   // Testing predicate
-  TestUtil("SELECT c, a from test where b=21", {"22", "20"}, false);
+  TestUtil("SELECT c, a from test where b=c", {"22", "20"}, false);
 }
 
 #if 0

@@ -22,6 +22,9 @@ namespace peloton {
 namespace codegen {
 
 DEFINE_METHOD(peloton::codegen, TransactionRuntime, PerformVectorizedRead);
+DEFINE_METHOD(peloton::codegen, TransactionRuntime, GetClockStart);
+DEFINE_METHOD(peloton::codegen, TransactionRuntime, GetClockPause);
+DEFINE_METHOD(peloton::codegen, TransactionRuntime, PrintClockDuration);
 
 }  // namespace codegen
 }  // namespace peloton
