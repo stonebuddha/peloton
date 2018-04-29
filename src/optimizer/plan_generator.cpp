@@ -110,11 +110,8 @@ void PlanGenerator::Visit(const PhysicalIndexScan *op) {
 
   // Create index scan desc
   planner::IndexScanPlan::IndexScanDesc index_scan_desc(
-      storage::StorageManager::GetInstance()
-          ->GetTableWithOid(op->table_->GetDatabaseOid(),
-                            op->table_->GetTableOid())
-          ->GetIndexWithOid(op->index_id),
-      op->key_column_id_list, op->expr_type_list, op->value_list, runtime_keys);
+      op->index_id, op->key_column_id_list, op->expr_type_list, op->value_list,
+      runtime_keys);
   output_plan_.reset(new planner::IndexScanPlan(
       storage::StorageManager::GetInstance()->GetTableWithOid(
           op->table_->GetDatabaseOid(), op->table_->GetTableOid()),
