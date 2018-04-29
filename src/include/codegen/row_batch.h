@@ -19,6 +19,7 @@
 #include "codegen/value.h"
 #include "codegen/vector.h"
 #include "planner/attribute_info.h"
+#include "common/exception.h"
 
 namespace peloton {
 namespace codegen {
@@ -47,6 +48,10 @@ class RowBatch {
 
     // Access the value given the row
     virtual codegen::Value Access(CodeGen &codegen, Row &row) = 0;
+
+    virtual llvm::Value *GetFixedLengthPtr(UNUSED_ATTRIBUTE CodeGen &codegen, UNUSED_ATTRIBUTE Row &row) {
+      throw Exception{"Only TableScanTranslator::AttributeAccess has this function: GetFixedLengthPtr"};
+    }
   };
 
   //===--------------------------------------------------------------------===//
@@ -90,6 +95,8 @@ class RowBatch {
                                const planner::AttributeInfo *ai);
     codegen::Value DeriveValue(CodeGen &codegen,
                                const expression::AbstractExpression &expr);
+    // Derive the pointer of the given attribute from this row
+    llvm::Value *DeriveFixedLengthPtrInTableScan(CodeGen &codegen, const planner::AttributeInfo *ai);
 
     // Does this row have a given attribute available?
     bool HasAttribute(const planner::AttributeInfo *ai) const;

@@ -93,6 +93,9 @@ class TileGroup {
   // Access a given column for the row with the given tid
   codegen::Value LoadColumn(CodeGen &codegen, llvm::Value *tid,
                             const TileGroup::ColumnLayout &layout) const;
+  // Get the pointer of a given column for the row with the given tid
+  llvm::Value *GetFixedLengthColumnPtr(CodeGen &codegen, llvm::Value *tid,
+                                       const TileGroup::ColumnLayout &layout) const;
 
  public:
   //===--------------------------------------------------------------------===//
@@ -116,6 +119,8 @@ class TileGroup {
 
       // Load the column at the given index
       codegen::Value LoadColumn(CodeGen &codegen, uint32_t col_idx) const;
+      // Get the pointer of the column at the given index
+      llvm::Value *GetFixedLengthColumnPtr(CodeGen &codegen, uint32_t col_idx) const;
 
       inline llvm::Value *GetTID() const { return tid_; }
 

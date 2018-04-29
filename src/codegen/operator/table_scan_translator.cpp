@@ -453,5 +453,11 @@ codegen::Value TableScanTranslator::AttributeAccess::Access(
   return raw_row.LoadColumn(codegen, ai_->attribute_id);
 }
 
+llvm::Value *TableScanTranslator::AttributeAccess::GetFixedLengthPtr(peloton::codegen::CodeGen &codegen,
+                                                            peloton::codegen::RowBatch::Row &row) {
+  auto raw_row = tile_group_access_.GetRow(row.GetTID(codegen));
+  return raw_row.GetFixedLengthColumnPtr(codegen, ai_->attribute_id);
+}
+
 }  // namespace codegen
 }  // namespace peloton

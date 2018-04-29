@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "codegen/row_batch.h"
+#include "codegen/operator/table_scan_translator.h"
 
 #include <llvm/Support/raw_ostream.h>
 
@@ -110,6 +111,18 @@ codegen::Value RowBatch::Row::DeriveValue(CodeGen &codegen,
   }
 
   // Not in cache, not an attribute in this row ... crap out
+  throw Exception{"Attribute '" + ai->name + "' is not an available attribute"};
+}
+
+llvm::Value *RowBatch::Row::DeriveFixedLengthPtrInTableScan(peloton::codegen::CodeGen &codegen,
+                                        const peloton::planner::AttributeInfo *ai) {
+  auto accessor_iter = batch_.GetAttributes().find(ai);
+  if (accessor_iter != batch_.GetAttributes().end()) {
+    auto *accessor = accessor_iter->second;
+    auto ret = accessor->GetFixedLengthPtr(codegen, *this);
+    return ret;
+  }
+
   throw Exception{"Attribute '" + ai->name + "' is not an available attribute"};
 }
 

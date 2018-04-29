@@ -69,6 +69,8 @@ class TableScanTranslator : public OperatorTranslator {
 
     // Access an attribute in the given row
     codegen::Value Access(CodeGen &codegen, RowBatch::Row &row) override;
+    // Get the pointer to an attribute in the given row
+    llvm::Value *GetFixedLengthPtr(CodeGen &codegen, RowBatch::Row &row) override;
 
     const planner::AttributeInfo *GetAttributeRef() const { return ai_; }
 

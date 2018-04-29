@@ -178,6 +178,32 @@ codegen::Value TileGroup::LoadColumn(
   return codegen::Value{type, val, length, is_null};
 }
 
+llvm::Value *TileGroup::GetFixedLengthColumnPtr(
+    CodeGen &codegen, llvm::Value *tid,
+    const TileGroup::ColumnLayout &layout) const {
+  // We're calculating: col[tid] = col_start + (tid * col_stride)
+  llvm::Value *col_address =
+      codegen->CreateInBoundsGEP(codegen.ByteType(), layout.col_start_ptr,
+                                 codegen->CreateMul(tid, layout.col_stride));
+
+  // Column metadata
+  const auto &column = schema_.GetColumn(layout.col_id);
+  const auto &sql_type = type::SqlType::LookupType(column.GetType());
+
+  PELOTON_ASSERT(!sql_type.IsVariableLength());
+
+  // Get the LLVM type of the column
+  llvm::Type *col_type = nullptr, *col_len_type = nullptr;
+  sql_type.GetTypeForMaterialization(codegen, col_type, col_len_type);
+  PELOTON_ASSERT(col_type != nullptr && col_len_type == nullptr);
+
+  // ptr = (col_type*)col_address;
+  llvm::Value *ptr = codegen->CreateBitCast(col_address, col_type->getPointerTo());
+
+  // Return the pointer
+  return ptr;
+}
+
 //===----------------------------------------------------------------------===//
 // TILE GROUP ROW
 //===----------------------------------------------------------------------===//
@@ -191,6 +217,12 @@ codegen::Value TileGroup::TileGroupAccess::Row::LoadColumn(
     CodeGen &codegen, uint32_t col_idx) const {
   PELOTON_ASSERT(col_idx < layout_.size());
   return tile_group_.LoadColumn(codegen, GetTID(), layout_[col_idx]);
+}
+
+llvm::Value *TileGroup::TileGroupAccess::Row::GetFixedLengthColumnPtr(
+    CodeGen &codegen, uint32_t col_idx) const {
+  PELOTON_ASSERT(col_idx < layout_.size());
+  return tile_group_.GetFixedLengthColumnPtr(codegen, GetTID(), layout_[col_idx]);
 }
 
 //===----------------------------------------------------------------------===//
