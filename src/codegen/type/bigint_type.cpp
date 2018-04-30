@@ -22,6 +22,8 @@
 #include "type/limits.h"
 #include "util/string_util.h"
 
+#define VECTOR_TYPE(ELEM_TYPE) (vector_type != nullptr ? llvm::VectorType::get(ELEM_TYPE, vector_type->getVectorNumElements()) : ELEM_TYPE)
+
 namespace peloton {
 namespace codegen {
 namespace type {
@@ -72,21 +74,22 @@ struct CastBigInt : public TypeSystem::CastHandleNull {
   Value Impl(CodeGen &codegen, const Value &value,
              const Type &to_type) const override {
     llvm::Value *result = nullptr;
+    auto *vector_type = llvm::dyn_cast<llvm::VectorType>(value.GetValue()->getType());
     switch (to_type.GetSqlType().TypeId()) {
       case peloton::type::TypeId::BOOLEAN: {
-        result = codegen->CreateTrunc(value.GetValue(), codegen.BoolType());
+        result = codegen->CreateTrunc(value.GetValue(), VECTOR_TYPE(codegen.BoolType()));
         break;
       }
       case peloton::type::TypeId::TINYINT: {
-        result = codegen->CreateTrunc(value.GetValue(), codegen.Int8Type());
+        result = codegen->CreateTrunc(value.GetValue(), VECTOR_TYPE(codegen.Int8Type()));
         break;
       }
       case peloton::type::TypeId::SMALLINT: {
-        result = codegen->CreateTrunc(value.GetValue(), codegen.Int16Type());
+        result = codegen->CreateTrunc(value.GetValue(), VECTOR_TYPE(codegen.Int16Type()));
         break;
       }
       case peloton::type::TypeId::INTEGER: {
-        result = codegen->CreateTrunc(value.GetValue(), codegen.Int32Type());
+        result = codegen->CreateTrunc(value.GetValue(), VECTOR_TYPE(codegen.Int32Type()));
         break;
       }
       case peloton::type::TypeId::BIGINT: {
@@ -94,7 +97,7 @@ struct CastBigInt : public TypeSystem::CastHandleNull {
         break;
       }
       case peloton::type::TypeId::DECIMAL: {
-        result = codegen->CreateSIToFP(value.GetValue(), codegen.DoubleType());
+        result = codegen->CreateSIToFP(value.GetValue(), VECTOR_TYPE(codegen.DoubleType()));
         break;
       }
       default: {

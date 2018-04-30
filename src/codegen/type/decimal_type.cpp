@@ -22,6 +22,8 @@
 #include "type/limits.h"
 #include "util/string_util.h"
 
+#define VECTOR_TYPE(ELEM_TYPE) (vector_type != nullptr ? llvm::VectorType::get(ELEM_TYPE, vector_type->getVectorNumElements()) : ELEM_TYPE)
+
 namespace peloton {
 namespace codegen {
 namespace type {
@@ -63,6 +65,8 @@ struct CastDecimal : public TypeSystem::CastHandleNull {
     llvm::Type *val_type = nullptr, *len_type = nullptr;
     to_type.GetSqlType().GetTypeForMaterialization(codegen, val_type, len_type);
 
+    auto *vector_type = llvm::dyn_cast<llvm::VectorType>(value.GetValue()->getType());
+
     llvm::Value *result = nullptr;
     switch (to_type.type_id) {
       case peloton::type::TypeId::BOOLEAN:
@@ -70,7 +74,7 @@ struct CastDecimal : public TypeSystem::CastHandleNull {
       case peloton::type::TypeId::SMALLINT:
       case peloton::type::TypeId::INTEGER:
       case peloton::type::TypeId::BIGINT: {
-        result = codegen->CreateFPToSI(value.GetValue(), val_type);
+        result = codegen->CreateFPToSI(value.GetValue(), VECTOR_TYPE(val_type));
         break;
       }
       default: {

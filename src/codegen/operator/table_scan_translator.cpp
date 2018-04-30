@@ -499,7 +499,8 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
             ;
         } */
 
-        lhs = codegen->CreateMaskedLoad(ptr, 0, mask);
+        auto *uncasted_lhs = codegen->CreateMaskedLoad(ptr, 0, mask);
+        lhs = codegen::Value{typ_lch, uncasted_lhs}.CastTo(codegen, cast_lch).GetValue();
 
         /*lhs = llvm::UndefValue::get(llvm::VectorType::get(cast_typ_lhs, N));
         for (uint32_t i = 0; i < N; ++i) {
@@ -537,7 +538,8 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
             ;
         } */
 
-        rhs = codegen->CreateMaskedLoad(ptr, 0, mask);
+        auto *uncasted_rhs = codegen->CreateMaskedLoad(ptr, 0, mask);
+        rhs = codegen::Value{typ_rch, uncasted_rhs}.CastTo(codegen, cast_rch).GetValue();
 
         /*rhs = llvm::UndefValue::get(llvm::VectorType::get(cast_typ_rhs, N));
         for (uint32_t i = 0; i < N; ++i) {
@@ -618,12 +620,75 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
     RowBatch::OutputTracker tracker{batch.GetSelectionVector(), write_pos};
     RowBatch::Row row = batch.GetRowAt(idx_cur, &tracker);
     llvm::Value *bool_val = codegen.ConstBool(true);
+
     for (auto &simd_predicate : simd_predicates) {
-      codegen::Value valid_row = row.DeriveValue(codegen, *simd_predicate);
-      PELOTON_ASSERT(valid_row.GetType().GetSqlType() ==
-                     type::Boolean::Instance());
-      bool_val = codegen->CreateAnd(bool_val, type::Boolean::Instance().Reify(codegen, valid_row));
+      llvm::Value *lhs = nullptr;
+      llvm::Value *rhs = nullptr;
+
+      auto *lch = simd_predicate->GetChild(0);
+      auto *rch = simd_predicate->GetChild(1);
+
+      auto typ_lch = type::Type(lch->GetValueType(), false);
+      auto typ_rch = type::Type(rch->GetValueType(), false);
+
+      llvm::Type *dummy, *orig_typ_lhs, *orig_typ_rhs;
+      typ_lch.GetSqlType().GetTypeForMaterialization(codegen, orig_typ_lhs, dummy);
+      typ_rch.GetSqlType().GetTypeForMaterialization(codegen, orig_typ_rhs, dummy);
+
+      auto cast_lch = typ_lch;
+      auto cast_rch = typ_rch;
+      type::TypeSystem::GetComparison(typ_lch, cast_lch, typ_rch, cast_rch);
+
+      llvm::Type *cast_typ_lhs, *cast_typ_rhs;
+      cast_lch.GetSqlType().GetTypeForMaterialization(codegen, cast_typ_lhs, dummy);
+      cast_rch.GetSqlType().GetTypeForMaterialization(codegen, cast_typ_rhs, dummy);
+
+      {
+        codegen::Value eval_row = row.DeriveValue(codegen, *lch);
+        codegen::Value temp_row{eval_row.GetType().AsNonNullable(), eval_row.GetValue()};
+        llvm::Value *ins_val = temp_row.CastTo(codegen, cast_lch).GetValue();
+        lhs = ins_val;
+      }
+
+      {
+        codegen::Value eval_row = row.DeriveValue(codegen, *rch);
+        codegen::Value temp_row{eval_row.GetType().AsNonNullable(), eval_row.GetValue()};
+        llvm::Value *ins_val = temp_row.CastTo(codegen, cast_rch).GetValue();
+        rhs = ins_val;
+      }
+
+      codegen::Value val_lhs(cast_lch, lhs);
+      codegen::Value val_rhs(cast_rch, rhs);
+
+      auto *cmp_exp = static_cast<const expression::ComparisonExpression *>(
+          simd_predicate.get());
+      llvm::Value *comp = nullptr;
+      switch (cmp_exp->GetExpressionType()) {
+        case ExpressionType::COMPARE_EQUAL:
+          comp = val_lhs.CompareEq(codegen, val_rhs).GetValue();
+          break;
+        case ExpressionType::COMPARE_NOTEQUAL:
+          comp = val_lhs.CompareNe(codegen, val_rhs).GetValue();
+          break;
+        case ExpressionType::COMPARE_LESSTHAN:
+          comp = val_lhs.CompareLt(codegen, val_rhs).GetValue();
+          break;
+        case ExpressionType::COMPARE_LESSTHANOREQUALTO:
+          comp = val_lhs.CompareLte(codegen, val_rhs).GetValue();
+          break;
+        case ExpressionType::COMPARE_GREATERTHAN:
+          comp = val_lhs.CompareGt(codegen, val_rhs).GetValue();
+          break;
+        case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
+          comp = val_lhs.CompareGte(codegen, val_rhs).GetValue();
+          break;
+        default:
+          ;
+      }
+
+      bool_val = codegen->CreateAnd(bool_val, comp);
     }
+
     row.SetValidity(codegen, bool_val);
     idx_cur->addIncoming(codegen->CreateAdd(idx_cur, codegen.Const32(1)),
                          loop_post_batch_bb);
