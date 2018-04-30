@@ -65,7 +65,7 @@ class SIMDSQLTests : public PelotonTest {
         "CREATE TABLE test(a INT , b DECIMAL, c DECIMAL);");
 
     // Insert tuples into table
-    uint32_t N = 10000;
+    uint32_t N = 10000000;
     txn = txn_manager.BeginTransaction();
     auto *catalog = catalog::Catalog::GetInstance();
     auto test_db = catalog->GetDatabaseWithName(DEFAULT_DB_NAME, txn);
@@ -162,8 +162,8 @@ class SIMDSQLTests : public PelotonTest {
 TEST_F(SIMDSQLTests, SimpleSelectTest) {
   // Testing predicate
   TestUtil(
-      //"SELECT c, a from test where b=21",
-      "SELECT c, a from test where a<70 and b=21",
+      "SELECT c, a from test where b=21",
+      //"SELECT c, a from test where a<70 and b=21",
       //"SELECT c, a from test where b=21 and a<70 and c>15 and b>7",
       {"22", "20"}, false);
 }

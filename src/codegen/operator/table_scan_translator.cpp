@@ -487,7 +487,7 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
         llvm::Value *ptr = first_row.DeriveFixedLengthPtrInTableScan(codegen, ai);
         ptr = codegen->CreateBitCast(ptr, llvm::VectorType::get(orig_typ_lhs, N)->getPointerTo());
 
-        unsigned align = 0;
+        /* unsigned align = 0;
         switch (lch->GetValueType()) {
           case peloton::type::TypeId::INTEGER:
             align = 4;
@@ -497,7 +497,7 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
             break;
           default:
             ;
-        }
+        } */
 
         lhs = codegen->CreateMaskedLoad(ptr, 0, mask);
 
@@ -525,7 +525,7 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
         llvm::Value *ptr = first_row.DeriveFixedLengthPtrInTableScan(codegen, ai);
         ptr = codegen->CreateBitCast(ptr, llvm::VectorType::get(orig_typ_rhs, N)->getPointerTo());
 
-        unsigned align = 0;
+        /* unsigned align = 0;
         switch (rch->GetValueType()) {
           case peloton::type::TypeId::INTEGER:
             align = 4;
@@ -535,7 +535,7 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
             break;
           default:
             ;
-        }
+        } */
 
         rhs = codegen->CreateMaskedLoad(ptr, 0, mask);
 
