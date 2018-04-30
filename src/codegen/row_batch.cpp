@@ -373,6 +373,10 @@ void RowBatch::UpdateWritePosition(llvm::Value *sz) {
   filtered_ = true;
 }
 
+void RowBatch::SetFiltered(bool filtered) {
+  filtered_ = filtered;
+}
+
 llvm::Value *RowBatch::GetPhysicalPosition(CodeGen &codegen,
                                            const Row &row) const {
   llvm::Value *batch_pos = row.GetBatchPosition();

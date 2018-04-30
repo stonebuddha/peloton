@@ -65,7 +65,7 @@ class SIMDSQLTests : public PelotonTest {
         "CREATE TABLE test(a INT , b DECIMAL, c DECIMAL);");
 
     // Insert tuples into table
-    uint32_t N = 10000000;
+    uint32_t N = 10000;
     txn = txn_manager.BeginTransaction();
     auto *catalog = catalog::Catalog::GetInstance();
     auto test_db = catalog->GetDatabaseWithName(DEFAULT_DB_NAME, txn);

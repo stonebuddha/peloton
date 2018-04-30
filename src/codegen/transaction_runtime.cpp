@@ -44,7 +44,7 @@ void TransactionRuntime::PrintClockDuration() {
 //       the actual reading. Can this be merged?
 uint32_t TransactionRuntime::PerformVectorizedRead(
     concurrency::TransactionContext &txn, storage::TileGroup &tile_group,
-    uint32_t tid_start, uint32_t tid_end, uint32_t *selection_vector) {
+    uint32_t tid_start, uint32_t tid_end, uint32_t *selection_vector, uint32_t selection_size) {
   // Get the transaction manager
   auto &txn_manager = concurrency::TransactionManagerFactory::GetInstance();
 
@@ -54,13 +54,22 @@ uint32_t TransactionRuntime::PerformVectorizedRead(
   // Check visibility of tuples in the range [tid_start, tid_end), storing all
   // visible tuple IDs in the provided selection vector
   uint32_t out_idx = 0;
-  for (uint32_t i = tid_start; i < tid_end; i++) {
-    // Perform the visibility check
-    auto visibility = txn_manager.IsVisible(&txn, tile_group_header, i);
+  if (selection_size == static_cast<uint32_t>(-1)) {
+    for (uint32_t i = tid_start; i < tid_end; i++) {
+      // Perform the visibility check
+      auto visibility = txn_manager.IsVisible(&txn, tile_group_header, i);
 
-    // Update the output position
-    selection_vector[out_idx] = i;
-    out_idx += (visibility == VisibilityType::OK);
+      // Update the output position
+      selection_vector[out_idx] = i;
+      out_idx += (visibility == VisibilityType::OK);
+    }
+  } else {
+    for (uint32_t idx = 0; idx < selection_size; idx++) {
+      auto visibility = txn_manager.IsVisible(&txn, tile_group_header, selection_vector[idx]);
+
+      selection_vector[out_idx] = selection_vector[idx];
+      out_idx += (visibility == VisibilityType::OK);
+    }
   }
 
   uint32_t tile_group_idx = tile_group.GetTileGroupId();

@@ -250,6 +250,8 @@ class RowBatch {
 
   void UpdateWritePosition(llvm::Value *sz);
 
+  void SetFiltered(bool filtered);
+
  private:
   // Get all the attributes of a row in this batch
   const AttributeMap &GetAttributes() const { return attributes_; }
