@@ -20,6 +20,9 @@
 #include "codegen/value.h"
 #include "type/timestamp_type.h"
 
+#define VECTOR_TYPE(ELEM_TYPE) (vector_type != nullptr ? llvm::VectorType::get(ELEM_TYPE, vector_type->getVectorNumElements()) : ELEM_TYPE)
+#define VECTOR_VALUE(ELEM_VALUE) (vector_type != nullptr ? codegen->CreateVectorSplat(vector_type->getVectorNumElements(), ELEM_VALUE) : ELEM_VALUE)
+
 namespace peloton {
 namespace codegen {
 namespace type {
@@ -49,8 +52,9 @@ struct CastTimestampToDate : public TypeSystem::CastHandleNull {
     // TODO: Fix me
     auto *usecs_per_date =
         codegen.Const64(peloton::type::TimestampType::kUsecsPerDate);
-    llvm::Value *date = codegen->CreateSDiv(value.GetValue(), usecs_per_date);
-    llvm::Value *result = codegen->CreateTrunc(date, codegen.Int32Type());
+    auto *vector_type = llvm::dyn_cast<llvm::VectorType>(value.GetValue()->getType());
+    llvm::Value *date = codegen->CreateSDiv(value.GetValue(), VECTOR_VALUE(usecs_per_date));
+    llvm::Value *result = codegen->CreateTrunc(date, VECTOR_TYPE(codegen.Int32Type()));
 
     // We could be casting this non-nullable value to a nullable type
     llvm::Value *null = to_type.nullable ? codegen.ConstBool(false) : nullptr;

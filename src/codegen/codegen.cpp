@@ -25,58 +25,6 @@
 namespace peloton {
 namespace codegen {
 
-static llvm::CallInst *createCallHelper(llvm::Value *Callee, llvm::ArrayRef<llvm::Value *> Ops,
-                                        llvm::IRBuilderBase *Builder, const llvm::Twine& Name = "") {
-  llvm::CallInst *CI = llvm::CallInst::Create(Callee, Ops, Name);
-  Builder->GetInsertBlock()->getInstList().insert(Builder->GetInsertPoint(), CI);
-  Builder->SetInstDebugLocation(CI);
-  return CI;
-}
-
-llvm::CallInst *CodeGen::CreateMaskedIntrinsic(llvm::Intrinsic::ID Id, llvm::ArrayRef<llvm::Value *> Ops,
-                                               llvm::Type *DataTy, const llvm::Twine &Name) {
-  auto &builder = GetBuilder();
-  auto *BB = builder.GetInsertBlock();
-  llvm::Module *M = BB->getParent()->getParent();
-  llvm::Type *OverloadedTypes = { DataTy };
-  llvm::Value *TheFn = llvm::Intrinsic::getDeclaration(M, Id, OverloadedTypes);
-  return createCallHelper(TheFn, Ops, &builder, Name);
-}
-
-llvm::CallInst *CodeGen::CreateMaskedGather(llvm::Value *Ptrs, unsigned Align, llvm::Value *Mask, llvm::Value *PassThru,
-                                            const llvm::Twine &Name) {
-  auto PtrsTy = llvm::cast<llvm::VectorType>(Ptrs->getType());
-  auto PtrTy = llvm::cast<llvm::PointerType>(PtrsTy->getElementType());
-  unsigned NumElts = PtrsTy->getVectorNumElements();
-  llvm::Type *DataTy = llvm::VectorType::get(PtrTy->getElementType(), NumElts);
-
-  if (!Mask) {
-    Mask = llvm::Constant::getAllOnesValue(llvm::VectorType::get(llvm::Type::getInt1Ty(GetContext()), NumElts));
-  }
-
-  if (!PassThru) {
-    PassThru = llvm::UndefValue::get(DataTy);
-  }
-
-  llvm::Value *Ops[] = {Ptrs, Const32(Align), Mask, PassThru};
-
-  return CreateMaskedIntrinsic(llvm::Intrinsic::masked_gather, Ops, DataTy, Name);
-}
-
-llvm::CallInst *CodeGen::CreateMaskedScatter(llvm::Value *Data, llvm::Value *Ptrs, unsigned Align, llvm::Value *Mask) {
-  auto PtrsTy = llvm::cast<llvm::VectorType>(Ptrs->getType());
-  auto DataTy = llvm::cast<llvm::VectorType>(Data->getType());
-  unsigned NumElts = PtrsTy->getVectorNumElements();
-
-  if (!Mask) {
-    Mask = llvm::Constant::getAllOnesValue(llvm::VectorType::get(llvm::Type::getInt1Ty(GetContext()), NumElts));
-  }
-
-  llvm::Value *Ops[] = {Data, Ptrs, Const32(Align), Mask};
-
-  return CreateMaskedIntrinsic(llvm::Intrinsic::masked_scatter, Ops, DataTy);
-}
-
 CodeGen::CodeGen(CodeContext &code_context) : code_context_(code_context) {}
 
 llvm::Type *CodeGen::ArrayType(llvm::Type *type, uint32_t num_elements) const {

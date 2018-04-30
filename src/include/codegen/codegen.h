@@ -96,12 +96,6 @@ class CodeGen {
     return CallFunc(proxy.GetFunction(*this), args);
   }
 
-  llvm::CallInst *CreateMaskedIntrinsic(llvm::Intrinsic::ID Id, llvm::ArrayRef<llvm::Value *> Ops,
-                                        llvm::Type *DataTy, const llvm::Twine &Name = "");
-  llvm::CallInst *CreateMaskedGather(llvm::Value *Ptrs, unsigned Align, llvm::Value *Mask, llvm::Value *PassThru,
-                                     const llvm::Twine &Name = "");
-  llvm::CallInst *CreateMaskedScatter(llvm::Value *Data, llvm::Value *Ptrs, unsigned Align, llvm::Value *Mask);
-
   //===--------------------------------------------------------------------===//
   // C/C++ standard library functions
   //===--------------------------------------------------------------------===//

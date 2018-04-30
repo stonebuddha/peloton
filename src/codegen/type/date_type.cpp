@@ -21,6 +21,9 @@
 #include "type/timestamp_type.h"
 #include "type/limits.h"
 
+#define VECTOR_TYPE(ELEM_TYPE) (vector_type != nullptr ? llvm::VectorType::get(ELEM_TYPE, vector_type->getVectorNumElements()) : ELEM_TYPE)
+#define VECTOR_VALUE(ELEM_VALUE) (vector_type != nullptr ? codegen->CreateVectorSplat(vector_type->getVectorNumElements(), ELEM_VALUE) : ELEM_VALUE)
+
 namespace peloton {
 namespace codegen {
 namespace type {
@@ -48,10 +51,11 @@ struct CastDateToTimestamp : public TypeSystem::CastHandleNull {
     PELOTON_ASSERT(SupportsTypes(value.GetType(), to_type));
 
     // Date is number of days since 2000, timestamp is micros since same
-    auto *date = codegen->CreateZExt(value.GetValue(), codegen.Int64Type());
+    auto *vector_type = llvm::dyn_cast<llvm::VectorType>(value.GetValue()->getType());
+    auto *date = codegen->CreateZExt(value.GetValue(), VECTOR_TYPE(codegen.Int64Type()));
     auto *usecs_per_date =
         codegen.Const64(peloton::type::TimestampType::kUsecsPerDate);
-    llvm::Value *timestamp = codegen->CreateMul(date, usecs_per_date);
+    llvm::Value *timestamp = codegen->CreateMul(date, VECTOR_VALUE(usecs_per_date));
 
     // We could be casting this non-nullable value to a nullable type
     llvm::Value *null = to_type.nullable ? codegen.ConstBool(false) : nullptr;

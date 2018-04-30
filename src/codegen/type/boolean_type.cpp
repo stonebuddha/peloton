@@ -19,6 +19,8 @@
 #include "common/exception.h"
 #include "type/limits.h"
 
+#define VECTOR_TYPE(ELEM_TYPE) (vector_type != nullptr ? llvm::VectorType::get(ELEM_TYPE, vector_type->getVectorNumElements()) : ELEM_TYPE)
+
 namespace peloton {
 namespace codegen {
 namespace type {
@@ -43,7 +45,8 @@ struct CastBooleanToInteger : public TypeSystem::CastHandleNull {
     PELOTON_ASSERT(SupportsTypes(value.GetType(), to_type));
 
     // Any integral value requires a zero-extension
-    auto *raw_val = codegen->CreateZExt(value.GetValue(), codegen.Int32Type());
+    auto *vector_type = llvm::dyn_cast<llvm::VectorType>(value.GetValue()->getType());
+    auto *raw_val = codegen->CreateZExt(value.GetValue(), VECTOR_TYPE(codegen.Int32Type()));
 
     // We could be casting this non-nullable value to a nullable type
     llvm::Value *null = to_type.nullable ? codegen.ConstBool(false) : nullptr;
@@ -65,8 +68,9 @@ struct CastBooleanToDecimal : public TypeSystem::CastHandleNull {
     PELOTON_ASSERT(SupportsTypes(value.GetType(), to_type));
 
     // Converts True to 1.0 and False to 0.0
+    auto *vector_type = llvm::dyn_cast<llvm::VectorType>(value.GetValue()->getType());
     auto *raw_val =
-        codegen->CreateUIToFP(value.GetValue(), codegen.DoubleType());
+        codegen->CreateUIToFP(value.GetValue(), VECTOR_TYPE(codegen.DoubleType()));
     return Value{to_type, raw_val, nullptr, nullptr};
   }
 };
