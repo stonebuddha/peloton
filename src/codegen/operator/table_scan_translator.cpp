@@ -300,32 +300,38 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
       auto *exp_lch = simd_predicate->GetChild(0);
       auto *exp_rch = simd_predicate->GetChild(1);
 
-      auto orig_typ_lch = type::Type(exp_lch->GetValueType(), false);
-      auto orig_typ_rch = type::Type(exp_rch->GetValueType(), false);
+      auto orig_typ_lch = type::Type(exp_lch->GetValueType(), exp_lch->IsNullable());
+      auto orig_typ_rch = type::Type(exp_rch->GetValueType(), exp_rch->IsNullable());
 
       auto cast_typ_lch = orig_typ_lch;
       auto cast_typ_rch = orig_typ_rch;
       type::TypeSystem::GetComparison(orig_typ_lch, cast_typ_lch, orig_typ_rch, cast_typ_rch);
+      cast_typ_lch.nullable = orig_typ_lch.nullable;
+      cast_typ_rch.nullable = orig_typ_rch.nullable;
 
       llvm::Type *dummy, *cast_typ_lhs, *cast_typ_rhs;
       cast_typ_lch.GetSqlType().GetTypeForMaterialization(codegen, cast_typ_lhs, dummy);
       cast_typ_rch.GetSqlType().GetTypeForMaterialization(codegen, cast_typ_rhs, dummy);
 
+      llvm::Value *lhs_is_null = nullptr;
+      llvm::Value *rhs_is_null = nullptr;
+
       if (dynamic_cast<const expression::ConstantValueExpression *>(exp_lch) !=
           nullptr) {
         RowBatch::Row row = batch.GetRowAt(ins.start);
         codegen::Value eval_row = row.DeriveValue(codegen, *exp_lch);
-        codegen::Value temp_row{eval_row.GetType().AsNonNullable(), eval_row.GetValue()};
-        llvm::Value *ins_val = temp_row.CastTo(codegen, cast_typ_lch).GetValue();
+        llvm::Value *ins_val = eval_row.CastTo(codegen, cast_typ_lch).GetValue();
         lhs = codegen->CreateVectorSplat(N, ins_val);
       } else {
         lhs = llvm::UndefValue::get(llvm::VectorType::get(cast_typ_lhs, N));
+        lhs_is_null = llvm::UndefValue::get(llvm::VectorType::get(codegen.BoolType(), N));
         for (uint32_t i = 0; i < N; ++i) {
           RowBatch::Row row =
               batch.GetRowAt(codegen->CreateAdd(ins.start, codegen.Const32(i)));
           codegen::Value eval_row = row.DeriveValue(codegen, *exp_lch);
-          llvm::Value *ins_val = eval_row.CastTo(codegen, cast_typ_lch).GetValue();
-          lhs = codegen->CreateInsertElement(lhs, ins_val, i);
+          auto cast_val = eval_row.CastTo(codegen, cast_typ_lch);
+          lhs = codegen->CreateInsertElement(lhs, cast_val.GetValue(), i);
+          lhs_is_null = codegen->CreateInsertElement(lhs_is_null, cast_val.IsNull(codegen), i);
         }
       }
 
@@ -333,44 +339,45 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
           nullptr) {
         RowBatch::Row row = batch.GetRowAt(ins.start);
         codegen::Value eval_row = row.DeriveValue(codegen, *exp_rch);
-        codegen::Value temp_row{eval_row.GetType().AsNonNullable(), eval_row.GetValue()};
-        llvm::Value *ins_val = temp_row.CastTo(codegen, cast_typ_rch).GetValue();
+        llvm::Value *ins_val = eval_row.CastTo(codegen, cast_typ_rch).GetValue();
         rhs = codegen->CreateVectorSplat(N, ins_val);
       } else {
         rhs = llvm::UndefValue::get(llvm::VectorType::get(cast_typ_lhs, N));
+        rhs_is_null = llvm::UndefValue::get(llvm::VectorType::get(codegen.BoolType(), N));
         for (uint32_t i = 0; i < N; ++i) {
           RowBatch::Row row =
               batch.GetRowAt(codegen->CreateAdd(ins.start, codegen.Const32(i)));
           codegen::Value eval_row = row.DeriveValue(codegen, *exp_rch);
-          llvm::Value *ins_val = eval_row.CastTo(codegen, cast_typ_rch).GetValue();
-          rhs = codegen->CreateInsertElement(rhs, ins_val, i);
+          auto cast_val = eval_row.CastTo(codegen, cast_typ_rch);
+          rhs = codegen->CreateInsertElement(rhs, cast_val.GetValue(), i);
+          rhs_is_null = codegen->CreateInsertElement(rhs_is_null, cast_val.IsNull(codegen), i);
         }
       }
 
-      codegen::Value val_lhs(cast_typ_lch, lhs);
-      codegen::Value val_rhs(cast_typ_rch, rhs);
+      codegen::Value val_lhs{cast_typ_lch, lhs, nullptr, lhs_is_null};
+      codegen::Value val_rhs{cast_typ_rch, rhs, nullptr, rhs_is_null};
 
       auto *exp_cmp = static_cast<const expression::ComparisonExpression *>(
           simd_predicate.get());
-      llvm::Value *comp = nullptr;
+      Value comp_val;
       switch (exp_cmp->GetExpressionType()) {
         case ExpressionType::COMPARE_EQUAL:
-          comp = val_lhs.CompareEq(codegen, val_rhs).GetValue();
+          comp_val = val_lhs.CompareEq(codegen, val_rhs);
           break;
         case ExpressionType::COMPARE_NOTEQUAL:
-          comp = val_lhs.CompareNe(codegen, val_rhs).GetValue();
+          comp_val = val_lhs.CompareNe(codegen, val_rhs);
           break;
         case ExpressionType::COMPARE_LESSTHAN:
-          comp = val_lhs.CompareLt(codegen, val_rhs).GetValue();
+          comp_val = val_lhs.CompareLt(codegen, val_rhs);
           break;
         case ExpressionType::COMPARE_LESSTHANOREQUALTO:
-          comp = val_lhs.CompareLte(codegen, val_rhs).GetValue();
+          comp_val = val_lhs.CompareLte(codegen, val_rhs);
           break;
         case ExpressionType::COMPARE_GREATERTHAN:
-          comp = val_lhs.CompareGt(codegen, val_rhs).GetValue();
+          comp_val = val_lhs.CompareGt(codegen, val_rhs);
           break;
         case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
-          comp = val_lhs.CompareGte(codegen, val_rhs).GetValue();
+          comp_val = val_lhs.CompareGte(codegen, val_rhs);
           break;
         default:
           ;
@@ -380,7 +387,11 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
         RowBatch::OutputTracker tracker{batch.GetSelectionVector(), final_pos};
         RowBatch::Row row = batch.GetRowAt(
             codegen->CreateAdd(ins.start, codegen.Const32(i)), &tracker);
-        row.SetValidity(codegen, codegen->CreateExtractElement(comp, i));
+        Value valid_row{comp_val.GetType(), codegen->CreateExtractElement(comp_val.GetValue(), i), nullptr, codegen->CreateExtractElement(comp_val.IsNull(codegen), i)};
+        PELOTON_ASSERT(valid_row.GetType().GetSqlType() == type::Boolean::Instance());
+        llvm::Value *bool_val =
+            type::Boolean::Instance().Reify(codegen, valid_row);
+        row.SetValidity(codegen, bool_val);
         final_pos = tracker.GetFinalOutputPos();
       }
 
@@ -411,69 +422,18 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
       RowBatch::OutputTracker tracker{batch.GetSelectionVector(), write_pos};
       RowBatch::Row row = batch.GetRowAt(idx_cur, &tracker);
 
-      llvm::Value *lhs = nullptr;
-      llvm::Value *rhs = nullptr;
+      codegen::Value valid_row = row.DeriveValue(codegen, *simd_predicate);
 
-      auto *exp_lch = simd_predicate->GetChild(0);
-      auto *exp_rch = simd_predicate->GetChild(1);
+      // Reify the boolean value since it may be NULL
+      PELOTON_ASSERT(valid_row.GetType().GetSqlType() ==
+                     type::Boolean::Instance());
+      llvm::Value *bool_val =
+          type::Boolean::Instance().Reify(codegen, valid_row);
 
-      auto orig_typ_lch = type::Type(exp_lch->GetValueType(), false);
-      auto orig_typ_rch = type::Type(exp_rch->GetValueType(), false);
-
-      auto cast_typ_lch = orig_typ_lch;
-      auto cast_typ_rch = orig_typ_rch;
-      type::TypeSystem::GetComparison(orig_typ_lch, cast_typ_lch, orig_typ_rch, cast_typ_rch);
-
-      llvm::Type *dummy, *cast_typ_lhs, *cast_typ_rhs;
-      cast_typ_lch.GetSqlType().GetTypeForMaterialization(codegen, cast_typ_lhs, dummy);
-      cast_typ_rch.GetSqlType().GetTypeForMaterialization(codegen, cast_typ_rhs, dummy);
-
-      {
-        codegen::Value eval_row = row.DeriveValue(codegen, *exp_lch);
-        codegen::Value temp_row{eval_row.GetType().AsNonNullable(), eval_row.GetValue()};
-        llvm::Value *ins_val = temp_row.CastTo(codegen, cast_typ_lch).GetValue();
-        lhs = ins_val;
-      }
-
-      {
-        codegen::Value eval_row = row.DeriveValue(codegen, *exp_rch);
-        codegen::Value temp_row{eval_row.GetType().AsNonNullable(), eval_row.GetValue()};
-        llvm::Value *ins_val = temp_row.CastTo(codegen, cast_typ_rch).GetValue();
-        rhs = ins_val;
-      }
-
-      codegen::Value val_lhs(cast_typ_lch, lhs);
-      codegen::Value val_rhs(cast_typ_rch, rhs);
-
-      auto *exp_cmp = static_cast<const expression::ComparisonExpression *>(
-          simd_predicate.get());
-      llvm::Value *comp = codegen.ConstBool(true);
-      switch (exp_cmp->GetExpressionType()) {
-        case ExpressionType::COMPARE_EQUAL:
-          comp = val_lhs.CompareEq(codegen, val_rhs).GetValue();
-          break;
-        case ExpressionType::COMPARE_NOTEQUAL:
-          comp = val_lhs.CompareNe(codegen, val_rhs).GetValue();
-          break;
-        case ExpressionType::COMPARE_LESSTHAN:
-          comp = val_lhs.CompareLt(codegen, val_rhs).GetValue();
-          break;
-        case ExpressionType::COMPARE_LESSTHANOREQUALTO:
-          comp = val_lhs.CompareLte(codegen, val_rhs).GetValue();
-          break;
-        case ExpressionType::COMPARE_GREATERTHAN:
-          comp = val_lhs.CompareGt(codegen, val_rhs).GetValue();
-          break;
-        case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
-          comp = val_lhs.CompareGte(codegen, val_rhs).GetValue();
-          break;
-        default:;
-      }
-
-      row.SetValidity(codegen, comp);
+      row.SetValidity(codegen, bool_val);
       idx_cur->addIncoming(codegen->CreateAdd(idx_cur, codegen.Const32(1)),
-                           loop_post_batch_bb);
-      write_pos->addIncoming(tracker.GetFinalOutputPos(), loop_post_batch_bb);
+                           codegen->GetInsertBlock());
+      write_pos->addIncoming(tracker.GetFinalOutputPos(), codegen->GetInsertBlock());
       codegen->CreateBr(check_post_batch_bb);
     }
 
@@ -519,8 +479,8 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
       auto *exp_lch = simd_predicate->GetChild(0);
       auto *exp_rch = simd_predicate->GetChild(1);
 
-      auto orig_typ_lch = type::Type(exp_lch->GetValueType(), false);
-      auto orig_typ_rch = type::Type(exp_rch->GetValueType(), false);
+      auto orig_typ_lch = type::Type(exp_lch->GetValueType(), exp_lch->IsNullable());
+      auto orig_typ_rch = type::Type(exp_rch->GetValueType(), exp_rch->IsNullable());
 
       llvm::Type *dummy, *orig_typ_lhs, *orig_typ_rhs;
       orig_typ_lch.GetSqlType().GetTypeForMaterialization(codegen, orig_typ_lhs, dummy);
@@ -529,17 +489,21 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
       auto cast_typ_lch = orig_typ_lch;
       auto cast_typ_rch = orig_typ_rch;
       type::TypeSystem::GetComparison(orig_typ_lch, cast_typ_lch, orig_typ_rch, cast_typ_rch);
+      cast_typ_lch.nullable = orig_typ_lch.nullable;
+      cast_typ_rch.nullable = orig_typ_rch.nullable;
 
       llvm::Type *cast_typ_lhs, *cast_typ_rhs;
       cast_typ_lch.GetSqlType().GetTypeForMaterialization(codegen, cast_typ_lhs, dummy);
       cast_typ_rch.GetSqlType().GetTypeForMaterialization(codegen, cast_typ_rhs, dummy);
 
+      llvm::Value *lhs_is_null = nullptr;
+      llvm::Value *rhs_is_null = nullptr;
+
       if (dynamic_cast<const expression::ConstantValueExpression *>(exp_lch) !=
           nullptr) {
         RowBatch::Row row = batch.GetRowAt(ins.start);
         codegen::Value eval_row = row.DeriveValue(codegen, *exp_lch);
-        codegen::Value temp_row{eval_row.GetType().AsNonNullable(), eval_row.GetValue()};
-        llvm::Value *ins_val = temp_row.CastTo(codegen, cast_typ_lch).GetValue();
+        llvm::Value *ins_val = eval_row.CastTo(codegen, cast_typ_lch).GetValue();
         lhs = codegen->CreateVectorSplat(N, ins_val);
       } else {
         auto *tve = static_cast<const expression::TupleValueExpression *>(exp_lch);
@@ -550,15 +514,25 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
         ptr = codegen->CreateBitCast(ptr, llvm::VectorType::get(orig_typ_lhs, N)->getPointerTo());
 
         auto *uncasted_lhs = codegen->CreateMaskedLoad(ptr, 0, mask);
-        lhs = codegen::Value{orig_typ_lch, uncasted_lhs}.CastTo(codegen, cast_typ_lch).GetValue();
+        if (orig_typ_lch.nullable) {
+          auto &sql_type = orig_typ_lch.GetSqlType();
+          auto val_tmp = Value{sql_type, uncasted_lhs};
+          auto null_val = Value{sql_type, codegen->CreateVectorSplat(N, sql_type.GetNullValue(codegen).GetValue())};
+          auto val_is_null = val_tmp.CompareEq(codegen, null_val);
+          llvm::Value *is_null = val_is_null.GetValue();
+          auto cast_val = codegen::Value{orig_typ_lch, uncasted_lhs, nullptr, is_null}.CastTo(codegen, cast_typ_lch);
+          lhs = cast_val.GetValue();
+          lhs_is_null = is_null;
+        } else {
+          lhs = codegen::Value{orig_typ_lch, uncasted_lhs}.CastTo(codegen, cast_typ_lch).GetValue();
+        }
       }
 
       if (dynamic_cast<const expression::ConstantValueExpression *>(exp_rch) !=
           nullptr) {
         RowBatch::Row row = batch.GetRowAt(ins.start);
         codegen::Value eval_row = row.DeriveValue(codegen, *exp_rch);
-        codegen::Value temp_row{eval_row.GetType().AsNonNullable(), eval_row.GetValue()};
-        llvm::Value *ins_val = temp_row.CastTo(codegen, cast_typ_rch).GetValue();
+        llvm::Value *ins_val = eval_row.CastTo(codegen, cast_typ_rch).GetValue();
         rhs = codegen->CreateVectorSplat(N, ins_val);
       } else {
         auto *tve = static_cast<const expression::TupleValueExpression *>(exp_rch);
@@ -569,39 +543,53 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
         ptr = codegen->CreateBitCast(ptr, llvm::VectorType::get(orig_typ_rhs, N)->getPointerTo());
 
         auto *uncasted_rhs = codegen->CreateMaskedLoad(ptr, 0, mask);
-        rhs = codegen::Value{orig_typ_rch, uncasted_rhs}.CastTo(codegen, cast_typ_rch).GetValue();
+        if (orig_typ_rch.nullable) {
+          auto &sql_type = orig_typ_rch.GetSqlType();
+          auto val_tmp = Value{sql_type, uncasted_rhs};
+          auto null_val = Value{sql_type, codegen->CreateVectorSplat(N, sql_type.GetNullValue(codegen).GetValue())};
+          auto val_is_null = val_tmp.CompareEq(codegen, null_val);
+          llvm::Value *is_null = val_is_null.GetValue();
+          auto cast_val = codegen::Value{orig_typ_rch, uncasted_rhs, nullptr, is_null}.CastTo(codegen, cast_typ_rch);
+          rhs = cast_val.GetValue();
+          rhs_is_null = is_null;
+        } else {
+          rhs = codegen::Value{orig_typ_rch, uncasted_rhs}.CastTo(codegen, cast_typ_rch).GetValue();
+        }
       }
 
-      codegen::Value val_lhs(cast_typ_lch, lhs);
-      codegen::Value val_rhs(cast_typ_rch, rhs);
+      codegen::Value val_lhs{cast_typ_lch, lhs, nullptr, lhs_is_null};
+      codegen::Value val_rhs{cast_typ_rch, rhs, nullptr, rhs_is_null};
 
       auto *exp_cmp = static_cast<const expression::ComparisonExpression *>(
           simd_predicate.get());
-      llvm::Value *comp = nullptr;
+      Value comp_val;
       switch (exp_cmp->GetExpressionType()) {
         case ExpressionType::COMPARE_EQUAL:
-          comp = val_lhs.CompareEq(codegen, val_rhs).GetValue();
+          comp_val = val_lhs.CompareEq(codegen, val_rhs);
           break;
         case ExpressionType::COMPARE_NOTEQUAL:
-          comp = val_lhs.CompareNe(codegen, val_rhs).GetValue();
+          comp_val = val_lhs.CompareNe(codegen, val_rhs);
           break;
         case ExpressionType::COMPARE_LESSTHAN:
-          comp = val_lhs.CompareLt(codegen, val_rhs).GetValue();
+          comp_val = val_lhs.CompareLt(codegen, val_rhs);
           break;
         case ExpressionType::COMPARE_LESSTHANOREQUALTO:
-          comp = val_lhs.CompareLte(codegen, val_rhs).GetValue();
+          comp_val = val_lhs.CompareLte(codegen, val_rhs);
           break;
         case ExpressionType::COMPARE_GREATERTHAN:
-          comp = val_lhs.CompareGt(codegen, val_rhs).GetValue();
+          comp_val = val_lhs.CompareGt(codegen, val_rhs);
           break;
         case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
-          comp = val_lhs.CompareGte(codegen, val_rhs).GetValue();
+          comp_val = val_lhs.CompareGte(codegen, val_rhs);
           break;
         default:
           ;
       }
 
-      mask = codegen->CreateAnd(mask, comp);
+      PELOTON_ASSERT(comp_val.GetType().GetSqlType() == type::Boolean::Instance());
+      auto bool_val = type::Boolean::Instance().Reify(codegen, comp_val);
+
+      mask = codegen->CreateAnd(mask, bool_val);
     }
 
     for (uint32_t i = 0; i < N; ++i) {
@@ -643,77 +631,18 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
     llvm::Value *mask = codegen.ConstBool(true);
 
     for (auto &simd_predicate : simd_predicates) {
-      llvm::Value *lhs = nullptr;
-      llvm::Value *rhs = nullptr;
-
-      auto *exp_lch = simd_predicate->GetChild(0);
-      auto *exp_rch = simd_predicate->GetChild(1);
-
-      auto orig_typ_lch = type::Type(exp_lch->GetValueType(), false);
-      auto orig_typ_rch = type::Type(exp_rch->GetValueType(), false);
-
-      llvm::Type *dummy, *orig_typ_lhs, *orig_typ_rhs;
-      orig_typ_lch.GetSqlType().GetTypeForMaterialization(codegen, orig_typ_lhs, dummy);
-      orig_typ_rch.GetSqlType().GetTypeForMaterialization(codegen, orig_typ_rhs, dummy);
-
-      auto cast_typ_lch = orig_typ_lch;
-      auto cast_typ_rch = orig_typ_rch;
-      type::TypeSystem::GetComparison(orig_typ_lch, cast_typ_lch, orig_typ_rch, cast_typ_rch);
-
-      llvm::Type *cast_typ_lhs, *cast_typ_rhs;
-      cast_typ_lch.GetSqlType().GetTypeForMaterialization(codegen, cast_typ_lhs, dummy);
-      cast_typ_rch.GetSqlType().GetTypeForMaterialization(codegen, cast_typ_rhs, dummy);
-
-      {
-        codegen::Value eval_row = row.DeriveValue(codegen, *exp_lch);
-        codegen::Value temp_row{eval_row.GetType().AsNonNullable(), eval_row.GetValue()};
-        llvm::Value *ins_val = temp_row.CastTo(codegen, cast_typ_lch).GetValue();
-        lhs = ins_val;
-      }
-
-      {
-        codegen::Value eval_row = row.DeriveValue(codegen, *exp_rch);
-        codegen::Value temp_row{eval_row.GetType().AsNonNullable(), eval_row.GetValue()};
-        llvm::Value *ins_val = temp_row.CastTo(codegen, cast_typ_rch).GetValue();
-        rhs = ins_val;
-      }
-
-      codegen::Value val_lhs(cast_typ_lch, lhs);
-      codegen::Value val_rhs(cast_typ_rch, rhs);
-
-      auto *exp_cmp = static_cast<const expression::ComparisonExpression *>(
-          simd_predicate.get());
-      llvm::Value *comp = nullptr;
-      switch (exp_cmp->GetExpressionType()) {
-        case ExpressionType::COMPARE_EQUAL:
-          comp = val_lhs.CompareEq(codegen, val_rhs).GetValue();
-          break;
-        case ExpressionType::COMPARE_NOTEQUAL:
-          comp = val_lhs.CompareNe(codegen, val_rhs).GetValue();
-          break;
-        case ExpressionType::COMPARE_LESSTHAN:
-          comp = val_lhs.CompareLt(codegen, val_rhs).GetValue();
-          break;
-        case ExpressionType::COMPARE_LESSTHANOREQUALTO:
-          comp = val_lhs.CompareLte(codegen, val_rhs).GetValue();
-          break;
-        case ExpressionType::COMPARE_GREATERTHAN:
-          comp = val_lhs.CompareGt(codegen, val_rhs).GetValue();
-          break;
-        case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
-          comp = val_lhs.CompareGte(codegen, val_rhs).GetValue();
-          break;
-        default:
-          ;
-      }
-
-      mask = codegen->CreateAnd(mask, comp);
+      codegen::Value valid_row = row.DeriveValue(codegen, *simd_predicate);
+      PELOTON_ASSERT(valid_row.GetType().GetSqlType() ==
+                     type::Boolean::Instance());
+      llvm::Value *bool_val =
+          type::Boolean::Instance().Reify(codegen, valid_row);
+      mask = codegen->CreateAnd(mask, bool_val);
     }
 
     row.SetValidity(codegen, mask);
     idx_cur->addIncoming(codegen->CreateAdd(idx_cur, codegen.Const32(1)),
-                         loop_post_batch_bb);
-    write_pos->addIncoming(tracker.GetFinalOutputPos(), loop_post_batch_bb);
+                         codegen->GetInsertBlock());
+    write_pos->addIncoming(tracker.GetFinalOutputPos(), codegen->GetInsertBlock());
     codegen->CreateBr(check_post_batch_bb);
   }
 

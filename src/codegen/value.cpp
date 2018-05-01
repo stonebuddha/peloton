@@ -33,10 +33,14 @@ Value::Value(const type::Type &type, llvm::Value *val, llvm::Value *length,
 // Return a boolean value indicating whether this value is NULL
 llvm::Value *Value::IsNull(CodeGen &codegen) const {
   if (IsNullable()) {
-    PELOTON_ASSERT(null_ != nullptr && null_->getType() == codegen.BoolType());
+    PELOTON_ASSERT(null_ != nullptr && (null_->getType() == codegen.BoolType() || llvm::cast<llvm::VectorType>(null_->getType())->getElementType() == codegen.BoolType()));
     return null_;
   } else {
-    return codegen.ConstBool(false);
+    if (auto *vector_type = llvm::dyn_cast<llvm::VectorType>(GetValue()->getType())) {
+      return codegen->CreateVectorSplat(vector_type->getVectorNumElements(), codegen.ConstBool(false));
+    } else {
+      return codegen.ConstBool(false);
+    }
   }
 }
 

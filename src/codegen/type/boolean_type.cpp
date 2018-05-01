@@ -350,8 +350,12 @@ llvm::Value *Boolean::Reify(CodeGen &codegen, const Value &bool_val) const {
   if (!bool_val.IsNullable()) {
     return bool_val.GetValue();
   } else {
+    llvm::Value *False = codegen.ConstBool(false);
+    if (auto *vector_type = llvm::dyn_cast<llvm::VectorType>(bool_val.GetValue()->getType())) {
+      False = codegen->CreateVectorSplat(vector_type->getVectorNumElements(), codegen.ConstBool(false));
+    }
     return codegen->CreateSelect(bool_val.IsNull(codegen),
-                                 codegen.ConstBool(false), bool_val.GetValue());
+                                 False, bool_val.GetValue());
   }
 }
 

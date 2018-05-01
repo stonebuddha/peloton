@@ -69,21 +69,27 @@ Value TypeSystem::CastHandleNull::Eval(CodeGen &codegen, const Value &value,
   }
 
   // The value is NULLable, we need to perform a null check
-
   Value null_val, ret_val;
-  lang::If is_null{codegen, value.IsNull(codegen), "is_null"};
+  // lang::If is_null{codegen, value.IsNull(codegen), "is_null"};
   {
     // If the value is NULL, return the NULL type for the target type
     null_val = to_type.GetSqlType().GetNullValue(codegen);
+    if (auto *vector_type = llvm::dyn_cast<llvm::VectorType>(value.GetValue()->getType())) {
+      null_val = Value{null_val.GetType(), codegen->CreateVectorSplat(vector_type->getVectorNumElements(), null_val.GetValue()),
+                       nullptr, codegen->CreateVectorSplat(vector_type->getVectorNumElements(), codegen.ConstBool(true))};
+    }
   }
-  is_null.ElseBlock();
+  // is_null.ElseBlock();
   {
     // If both values are not null, perform the non-null-aware operation
     ret_val = Impl(codegen, value, to_type);
   }
-  is_null.EndIf();
+  // is_null.EndIf();
 
-  return is_null.BuildPHI(null_val, ret_val);
+  auto *is_null = value.IsNull(codegen);
+  return Value{null_val.GetType(), codegen->CreateSelect(is_null, null_val.GetValue(), ret_val.GetValue(), "is_null"),
+               nullptr, is_null};
+  // return is_null.BuildPHI(null_val, ret_val);
 }
 
 //===----------------------------------------------------------------------===//

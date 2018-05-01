@@ -62,7 +62,7 @@ class SIMDSQLTests : public PelotonTest {
 
     // Create a table first
     TestingSQLUtil::ExecuteSQLQuery(
-        "CREATE TABLE test(a INT , b DECIMAL, c DECIMAL);");
+        "CREATE TABLE test(a INT NOT NULL, b INT NOT NULL, c DECIMAL NOT NULL);");
 
     // Insert tuples into table
     uint32_t N = 10000000;
@@ -82,7 +82,7 @@ class SIMDSQLTests : public PelotonTest {
       storage::Tuple tuple{table_schema, allocate};
 
       tuple.SetValue(0, type::ValueFactory::GetIntegerValue(col_val(rowid, 0)));
-      tuple.SetValue(1, type::ValueFactory::GetDecimalValue(col_val(rowid, 1)));
+      tuple.SetValue(1, type::ValueFactory::GetIntegerValue(col_val(rowid, 1)));
       tuple.SetValue(2, type::ValueFactory::GetDecimalValue(col_val(rowid, 2)));
 
       ItemPointer *index_entry_ptr = nullptr;
