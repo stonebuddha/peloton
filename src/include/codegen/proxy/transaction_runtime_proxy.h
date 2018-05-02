@@ -23,6 +23,7 @@ PROXY(TransactionRuntime) {
   DECLARE_METHOD(PerformVectorizedRead);
   DECLARE_METHOD(GetClockStart);
   DECLARE_METHOD(GetClockPause);
+  DECLARE_METHOD(ResetClockDuration);
   DECLARE_METHOD(PrintClockDuration);
 };
 

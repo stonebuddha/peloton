@@ -45,9 +45,11 @@ class TransactionRuntime {
  public:
   static void GetClockStart();
   static void GetClockPause();
+  static void ResetClockDuration();
   static void PrintClockDuration();
 
-  static std::chrono::time_point<std::chrono::high_resolution_clock> time_point;
+  // static std::chrono::time_point<std::chrono::high_resolution_clock> time_point;
+  static std::clock_t time_point;
   static double duration;
 
   // Perform a read operation for all tuples in the given tile group with IDs

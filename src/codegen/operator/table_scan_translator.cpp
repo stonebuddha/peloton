@@ -81,6 +81,7 @@ void TableScanTranslator::Produce() const {
   auto &table = GetTable();
 
   LOG_TRACE("TableScan on [%u] starting to produce tuples ...", table.GetOid());
+  codegen.Call(TransactionRuntimeProxy::ResetClockDuration, {});
 
   // Get the table instance from the database
   llvm::Value *storage_manager_ptr = GetStorageManagerPtr();

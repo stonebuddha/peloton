@@ -22,17 +22,25 @@
 namespace peloton {
 namespace codegen {
 
-double TransactionRuntime::duration = 0.0;
-std::chrono::time_point<std::chrono::high_resolution_clock> TransactionRuntime::time_point;
+double TransactionRuntime::duration;
+// std::chrono::time_point<std::chrono::high_resolution_clock> TransactionRuntime::time_point;
+std::clock_t TransactionRuntime::time_point;
 
 void TransactionRuntime::GetClockStart() {
-  time_point = std::chrono::high_resolution_clock::now();
+  // time_point = std::chrono::high_resolution_clock::now();
+  time_point = std::clock();
 }
 
 void TransactionRuntime::GetClockPause() {
-  auto new_time_point = std::chrono::high_resolution_clock::now();
+  /* auto new_time_point = std::chrono::high_resolution_clock::now();
   duration += std::chrono::duration_cast<std::chrono::duration<double, std::ratio<1, 1000>>>(new_time_point - time_point)
-      .count();
+      .count(); */
+  auto new_time_point = std::clock();
+  duration += (new_time_point - time_point) / (double) CLOCKS_PER_SEC * 1000.0;
+}
+
+void TransactionRuntime::ResetClockDuration() {
+  duration = 0.0;
 }
 
 void TransactionRuntime::PrintClockDuration() {
