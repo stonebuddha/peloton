@@ -62,7 +62,7 @@ class SIMDSQLTests : public PelotonTest {
 
     // Create a table first
     TestingSQLUtil::ExecuteSQLQuery(
-        "CREATE TABLE test(a INT NOT NULL, b INT NOT NULL, c DECIMAL NOT NULL);");
+        "CREATE TABLE test(a INT, b INT, c DECIMAL);");
 
     // Insert tuples into table
     uint32_t N = 10000000;
@@ -162,7 +162,7 @@ class SIMDSQLTests : public PelotonTest {
 TEST_F(SIMDSQLTests, SimpleSelectTest) {
   // Testing predicate
   TestUtil(
-      "SELECT c, a from test where b=21",
+      "SELECT c, a from test where b+5-2*5+(2+3)=21-5*2+12-2",
       {"22", "20"}, false);
 }
 

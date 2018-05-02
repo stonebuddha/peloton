@@ -39,18 +39,25 @@ Value GenerateBinaryHandleNull(
   auto *null = codegen->CreateOr(left.IsNull(codegen), right.IsNull(codegen));
 
   Value null_val, ret_val;
-  lang::If is_null{codegen, null, "is_null"};
+  // lang::If is_null{codegen, null, "is_null"};
   {
     // If either value is null, the result of the operator is null
     null_val = result_type.GetNullValue(codegen);
+    if (auto *vector_type = llvm::dyn_cast<llvm::VectorType>(left.GetValue()->getType())) {
+      null_val = Value{null_val.GetType(), codegen->CreateVectorSplat(vector_type->getVectorNumElements(), null_val.GetValue()),
+                       nullptr, codegen->CreateVectorSplat(vector_type->getVectorNumElements(), codegen.ConstBool(true))};
+    }
   }
-  is_null.ElseBlock();
+  // is_null.ElseBlock();
   {
     // If both values are not null, perform the non-null-aware operation
     ret_val = impl(codegen, left, right);
   }
-  is_null.EndIf();
-  return is_null.BuildPHI(null_val, ret_val);
+  // is_null.EndIf();
+
+  return Value{null_val.GetType(), codegen->CreateSelect(null, null_val.GetValue(), ret_val.GetValue(), "is_null"),
+               nullptr, null};
+  // return is_null.BuildPHI(null_val, ret_val);
 }
 
 }  // anonymous namespace

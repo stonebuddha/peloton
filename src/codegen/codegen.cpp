@@ -22,6 +22,9 @@
 
 #include "codegen/function_builder.h"
 
+
+#define DO_NOT_HANDLE_OVERFLOW
+
 namespace peloton {
 namespace codegen {
 
@@ -158,6 +161,7 @@ llvm::Value *CodeGen::CallAddWithOverflow(llvm::Value *left, llvm::Value *right,
                                           llvm::Value *&overflow_bit) {
   PELOTON_ASSERT(left->getType() == right->getType());
 
+#ifndef DO_NOT_HANDLE_OVERFLOW
   // Get the intrinsic that does the addition with overflow checking
   llvm::Function *add_func = llvm::Intrinsic::getDeclaration(
       &GetModule(), llvm::Intrinsic::sadd_with_overflow, left->getType());
@@ -170,12 +174,18 @@ llvm::Value *CodeGen::CallAddWithOverflow(llvm::Value *left, llvm::Value *right,
 
   // Pull out the actual result of the addition
   return GetBuilder().CreateExtractValue(add_result, 0);
+#else
+  llvm::Value *add_result = (*this)->CreateAdd(left, right);
+  overflow_bit = ConstBool(false);
+  return add_result;
+#endif
 }
 
 llvm::Value *CodeGen::CallSubWithOverflow(llvm::Value *left, llvm::Value *right,
                                           llvm::Value *&overflow_bit) {
   PELOTON_ASSERT(left->getType() == right->getType());
 
+#ifndef DO_NOT_HANDLE_OVERFLOW
   // Get the intrinsic that does the addition with overflow checking
   llvm::Function *sub_func = llvm::Intrinsic::getDeclaration(
       &GetModule(), llvm::Intrinsic::ssub_with_overflow, left->getType());
@@ -188,11 +198,17 @@ llvm::Value *CodeGen::CallSubWithOverflow(llvm::Value *left, llvm::Value *right,
 
   // Pull out the actual result of the subtraction
   return GetBuilder().CreateExtractValue(sub_result, 0);
+#else
+  llvm::Value *sub_result = (*this)->CreateSub(left, right);
+  overflow_bit = ConstBool(false);
+  return sub_result;
+#endif
 }
 
 llvm::Value *CodeGen::CallMulWithOverflow(llvm::Value *left, llvm::Value *right,
                                           llvm::Value *&overflow_bit) {
   PELOTON_ASSERT(left->getType() == right->getType());
+#ifndef DO_NOT_HANDLE_OVERFLOW
   llvm::Function *mul_func = llvm::Intrinsic::getDeclaration(
       &GetModule(), llvm::Intrinsic::smul_with_overflow, left->getType());
 
@@ -204,6 +220,11 @@ llvm::Value *CodeGen::CallMulWithOverflow(llvm::Value *left, llvm::Value *right,
 
   // Pull out the actual result of the subtraction
   return GetBuilder().CreateExtractValue(mul_result, 0);
+#else
+  llvm::Value *mul_result = (*this)->CreateMul(left, right);
+  overflow_bit = ConstBool(false);
+  return mul_result;
+#endif
 }
 
 void CodeGen::ThrowIfOverflow(llvm::Value *overflow) const {

@@ -249,6 +249,22 @@ void ExtractEquiJoinKeys(
   }
 }
 
+static bool CheckArithmeticSIMDExpression(const expression::AbstractExpression *exp) {
+  auto type = exp->GetExpressionType();
+  if (type == ExpressionType::VALUE_TUPLE ||
+      type == ExpressionType::VALUE_CONSTANT ||
+      type == ExpressionType::VALUE_PARAMETER) {
+    return true;
+  } else if (type == ExpressionType::OPERATOR_PLUS ||
+             type == ExpressionType::OPERATOR_MINUS ||
+             type == ExpressionType::OPERATOR_MULTIPLY) {
+    return CheckArithmeticSIMDExpression(exp->GetChild(0)) &&
+           CheckArithmeticSIMDExpression(exp->GetChild(1));
+  } else {
+    return false;
+  }
+}
+
 void IdentifySIMDPredicates(
     const std::vector<AnnotatedExpression> &predicates,
     std::vector<AnnotatedExpression> &simd_predicates,
@@ -266,18 +282,11 @@ void IdentifySIMDPredicates(
         expr_type == ExpressionType::COMPARE_GREATERTHANOREQUALTO) {
       auto l_expr = expr_unit.expr->GetChild(0);
       auto r_expr = expr_unit.expr->GetChild(1);
-      auto l_expr_type = l_expr->GetExpressionType();
-      auto r_expr_type = r_expr->GetExpressionType();
 
       // Check that the left and right children are either VALUE_TYPE or
       // CONSTANT expressions. We assume that it would already be optimized by
       // earlier passes if both children are constants.
-      if ((l_expr_type == ExpressionType::VALUE_TUPLE ||
-           l_expr_type == ExpressionType::VALUE_CONSTANT ||
-           l_expr_type == ExpressionType::VALUE_PARAMETER) &&
-          (r_expr_type == ExpressionType::VALUE_TUPLE ||
-           r_expr_type == ExpressionType::VALUE_CONSTANT ||
-           r_expr_type == ExpressionType::VALUE_PARAMETER)) {
+      if (CheckArithmeticSIMDExpression(l_expr) && CheckArithmeticSIMDExpression(r_expr)) {
         auto l_val_type = l_expr->GetValueType();
         auto r_val_type = r_expr->GetValueType();
 
