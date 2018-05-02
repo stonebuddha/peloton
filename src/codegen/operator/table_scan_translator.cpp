@@ -31,7 +31,7 @@
 
 #include "llvm/IR/Module.h"
 
-// #define ORIGINAL_ORDER
+#define ORIGINAL_ORDER
 
 namespace peloton {
 namespace codegen {
@@ -415,17 +415,18 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
                                                     IterationInstance &ins) {
       auto comp_val = VectorizedDeriveValue(codegen, N, batch, ins.start, true, simd_predicate.get());
 
+      PELOTON_ASSERT(comp_val.GetType().GetSqlType() ==
+                     type::Boolean::Instance());
+      llvm::Value *bool_val =
+          type::Boolean::Instance().Reify(codegen, comp_val);
+
       llvm::Value *final_pos = ins.write_pos;
 
       for (uint32_t i = 0; i < N; ++i) {
         RowBatch::OutputTracker tracker{batch.GetSelectionVector(), final_pos};
         RowBatch::Row row = batch.GetRowAt(
             codegen->CreateAdd(ins.start, codegen.Const32(i)), &tracker);
-        Value valid_row{comp_val.GetType(), codegen->CreateExtractElement(comp_val.GetValue(), i), nullptr, codegen->CreateExtractElement(comp_val.IsNull(codegen), i)};
-        PELOTON_ASSERT(valid_row.GetType().GetSqlType() == type::Boolean::Instance());
-        llvm::Value *bool_val =
-            type::Boolean::Instance().Reify(codegen, valid_row);
-        row.SetValidity(codegen, bool_val);
+        row.SetValidity(codegen, codegen->CreateExtractElement(bool_val, i));
         final_pos = tracker.GetFinalOutputPos();
       }
 
