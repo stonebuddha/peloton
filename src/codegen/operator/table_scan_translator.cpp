@@ -259,8 +259,9 @@ static codegen::Value VectorizedDeriveValue(
     llvm::Value *ptr = first_row.DeriveFixedLengthPtrInTableScan(codegen, ai);
     ptr = codegen->CreateBitCast(ptr, llvm::VectorType::get(llvm_type, N)->getPointerTo());
 
-    llvm::Value *val = codegen->CreateMaskedLoad(ptr, 0, llvm::Constant::getAllOnesValue(
-        llvm::VectorType::get(codegen.BoolType(), N)));
+    // llvm::Value *val = codegen->CreateMaskedLoad(ptr, 0, llvm::Constant::getAllOnesValue(
+    //     llvm::VectorType::get(codegen.BoolType(), N)));
+    llvm::Value *val = codegen->CreateLoad(ptr);
     llvm::Value *is_null = nullptr;
     if (type.nullable) {
       auto &sql_type = type.GetSqlType();
