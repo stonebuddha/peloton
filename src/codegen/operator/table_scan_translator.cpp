@@ -31,7 +31,7 @@
 
 #include "llvm/IR/Module.h"
 
-#define ORIGINAL_ORDER
+// #define ORIGINAL_ORDER
 
 namespace peloton {
 namespace codegen {
