@@ -247,7 +247,7 @@ TableScanTranslator::ScanConsumer::GetNonSIMDPredicate() const {
 }
 
 static codegen::Value VectorizedDeriveValue(
-    CodeGen &codegen, uint64_t N, RowBatch::Row &first_row,
+    CodeGen &codegen, uint64_t N, RowBatch &batch, llvm::Value *start, bool filtered,
     const expression::AbstractExpression *exp) {
   type::Type type{exp->GetValueType(), exp->IsNullable()};
   llvm::Type *llvm_type, *dummy;
@@ -256,26 +256,46 @@ static codegen::Value VectorizedDeriveValue(
   if (auto *tve = dynamic_cast<const expression::TupleValueExpression *>(exp)) {
     auto *ai = tve->GetAttributeRef();
 
-    llvm::Value *ptr = first_row.DeriveFixedLengthPtrInTableScan(codegen, ai);
-    ptr = codegen->CreateBitCast(ptr, llvm::VectorType::get(llvm_type, N)->getPointerTo());
+    if (!filtered) {
+      RowBatch::Row first_row = batch.GetRowAt(start);
 
-    // llvm::Value *val = codegen->CreateMaskedLoad(ptr, 0, llvm::Constant::getAllOnesValue(
-    //     llvm::VectorType::get(codegen.BoolType(), N)));
-    llvm::Value *val = codegen->CreateLoad(ptr);
-    llvm::Value *is_null = nullptr;
-    if (type.nullable) {
-      auto &sql_type = type.GetSqlType();
-      Value tmp_val{sql_type, val};
-      Value null_val{sql_type, codegen->CreateVectorSplat(N, sql_type.GetNullValue(codegen).GetValue())};
-      auto val_is_null = tmp_val.CompareEq(codegen, null_val);
-      is_null = val_is_null.GetValue();
+      llvm::Value *ptr = first_row.DeriveFixedLengthPtrInTableScan(codegen, ai);
+      ptr = codegen->CreateBitCast(ptr, llvm::VectorType::get(llvm_type, N)->getPointerTo());
+
+      // llvm::Value *val = codegen->CreateMaskedLoad(ptr, 0, llvm::Constant::getAllOnesValue(
+      //     llvm::VectorType::get(codegen.BoolType(), N)));
+      llvm::Value *val = codegen->CreateLoad(ptr);
+      llvm::Value *is_null = nullptr;
+      if (type.nullable) {
+        auto &sql_type = type.GetSqlType();
+        Value tmp_val{sql_type, val};
+        Value null_val{sql_type, codegen->CreateVectorSplat(N, sql_type.GetNullValue(codegen).GetValue())};
+        auto val_is_null = tmp_val.CompareEq(codegen, null_val);
+        is_null = val_is_null.GetValue();
+      }
+
+      return Value{type, val, nullptr, is_null};
+    } else {
+      llvm::Value *val = llvm::UndefValue::get(llvm::VectorType::get(llvm_type, N));
+      llvm::Value *is_null = type.nullable ? llvm::UndefValue::get(llvm::VectorType::get(codegen.BoolType(), N)) : nullptr;
+      for (uint32_t i = 0; i < N; ++i) {
+        RowBatch::Row row =
+            batch.GetRowAt(codegen->CreateAdd(start, codegen.Const32(i)));
+        codegen::Value eval_row = row.DeriveValue(codegen, ai);
+        val = codegen->CreateInsertElement(val, eval_row.GetValue(), i);
+        if (type.nullable) {
+          is_null = codegen->CreateInsertElement(is_null, eval_row.IsNull(codegen), i);
+        }
+      }
+
+      return Value{type, val, nullptr, is_null};
     }
-
-    return Value{type, val, nullptr, is_null};
   }
 
   if (dynamic_cast<const expression::ConstantValueExpression *>(exp) ||
       dynamic_cast<const expression::ParameterValueExpression *>(exp)) {
+    RowBatch::Row first_row = batch.GetRowAt(start);
+
     Value const_val = first_row.DeriveValue(codegen, *exp);
     llvm::Value *ins_val = const_val.GetValue();
     llvm::Value *val = codegen->CreateVectorSplat(N, ins_val);
@@ -287,8 +307,8 @@ static codegen::Value VectorizedDeriveValue(
   }
 
   if (auto *comp_exp = dynamic_cast<const expression::ComparisonExpression *>(exp)) {
-    Value lhs_val = VectorizedDeriveValue(codegen, N, first_row, comp_exp->GetChild(0));
-    Value rhs_val = VectorizedDeriveValue(codegen, N, first_row, comp_exp->GetChild(1));
+    Value lhs_val = VectorizedDeriveValue(codegen, N, batch, start, filtered, comp_exp->GetChild(0));
+    Value rhs_val = VectorizedDeriveValue(codegen, N, batch, start, filtered, comp_exp->GetChild(1));
 
     Value comp_val;
     switch (comp_exp->GetExpressionType()) {
@@ -319,8 +339,8 @@ static codegen::Value VectorizedDeriveValue(
   }
 
   if (auto *op_exp = dynamic_cast<const expression::OperatorExpression *>(exp)) {
-    Value lhs_val = VectorizedDeriveValue(codegen, N, first_row, op_exp->GetChild(0));
-    Value rhs_val = VectorizedDeriveValue(codegen, N, first_row, op_exp->GetChild(1));
+    Value lhs_val = VectorizedDeriveValue(codegen, N, batch, start, filtered, op_exp->GetChild(0));
+    Value rhs_val = VectorizedDeriveValue(codegen, N, batch, start, filtered, op_exp->GetChild(1));
 
     Value op_val;
     switch (op_exp->GetExpressionType()) {
@@ -393,9 +413,7 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
     batch.VectorizedIterate(codegen, N, [&](RowBatch::
                                                 VectorizedIterateCallback::
                                                     IterationInstance &ins) {
-      RowBatch::Row first_row = batch.GetRowAt(ins.start);
-
-      auto comp_val = VectorizedDeriveValue(codegen, N, first_row, simd_predicate.get());
+      auto comp_val = VectorizedDeriveValue(codegen, N, batch, ins.start, true, simd_predicate.get());
 
       llvm::Value *final_pos = ins.write_pos;
 
@@ -484,12 +502,13 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
   batch.VectorizedIterate(codegen, N, [&](RowBatch::
                                           VectorizedIterateCallback::
                                           IterationInstance &ins) {
-    RowBatch::Row first_row = batch.GetRowAt(ins.start);
-
     llvm::Value *mask = llvm::Constant::getAllOnesValue(llvm::VectorType::get(codegen.BoolType(), N));
 
     for (auto &simd_predicate : simd_predicates) {
-      auto comp_val = VectorizedDeriveValue(codegen, N, first_row, simd_predicate.get());
+      LOG_INFO("SIMD predicate detected");
+      LOG_INFO("%s", simd_predicate->GetInfo().c_str());
+
+      auto comp_val = VectorizedDeriveValue(codegen, N, batch, ins.start, false, simd_predicate.get());
 
       PELOTON_ASSERT(comp_val.GetType().GetSqlType() == type::Boolean::Instance());
       auto bool_val = type::Boolean::Instance().Reify(codegen, comp_val);

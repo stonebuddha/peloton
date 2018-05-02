@@ -162,7 +162,7 @@ class SIMDSQLTests : public PelotonTest {
 TEST_F(SIMDSQLTests, SimpleSelectTest) {
   // Testing predicate
   TestUtil(
-      "SELECT c, a from test where b+5-2*5+(2+3)=21-5*2+12-2",
+      "SELECT c, a from test where (b-2)*3+5*a=(c-2)*8-3 and b=21",
       {"22", "20"}, false);
 }
 
