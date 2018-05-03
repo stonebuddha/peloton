@@ -294,7 +294,9 @@ static codegen::Value VectorizedDeriveValue(
       }
 
       codegen::Value ret{type, val, nullptr, is_null};
-      cache->insert(std::make_pair(ai, ret));
+      if (cache != nullptr) {
+        cache->insert(std::make_pair(ai, ret));
+      }
       return ret;
     } else {
       llvm::Value *val =
@@ -323,7 +325,9 @@ static codegen::Value VectorizedDeriveValue(
       }
 
       codegen::Value ret{type, val, nullptr, is_null};
-      cache->insert(std::make_pair(ai, ret));
+      if (cache != nullptr) {
+        cache->insert(std::make_pair(ai, ret));
+      }
       return ret;
     }
   }
