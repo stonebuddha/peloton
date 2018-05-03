@@ -162,23 +162,49 @@ class SIMDSQLTests : public PelotonTest {
 TEST_F(SIMDSQLTests, SimpleSelectTest) {
   // Testing predicate
   TestUtil("SELECT c, a from test where b=21", {"22", "20"}, false);
+  TestUtil("SELECT c, a from test where b=21", {"22", "20"}, false);
+  TestUtil("SELECT c, a from test where b=21", {"22", "20"}, false);
+  TestUtil("SELECT c, a from test where b=21", {"22", "20"}, false);
+  TestUtil("SELECT c, a from test where b=21", {"22", "20"}, false);
 }
 
 TEST_F(SIMDSQLTests, SimpleSelectTestF) {
   TestUtil("SELECT c, a from test where c=22", {"22", "20"}, false);
+  TestUtil("SELECT c, a from test where c=22", {"22", "20"}, false);
+  TestUtil("SELECT c, a from test where c=22", {"22", "20"}, false);
+  TestUtil("SELECT c, a from test where c=22", {"22", "20"}, false);
+  TestUtil("SELECT c, a from test where c=22", {"22", "20"}, false);
 }
 
 TEST_F(SIMDSQLTests, SelectTest1) {
+  TestUtil("SELECT c, a from test where a<70.0 and b=21", {"22", "20"}, false);
+  TestUtil("SELECT c, a from test where a<70.0 and b=21", {"22", "20"}, false);
+  TestUtil("SELECT c, a from test where a<70.0 and b=21", {"22", "20"}, false);
+  TestUtil("SELECT c, a from test where a<70.0 and b=21", {"22", "20"}, false);
   TestUtil("SELECT c, a from test where a<70.0 and b=21", {"22", "20"}, false);
 }
 
 TEST_F(SIMDSQLTests, SelectTest2) {
   TestUtil("SELECT c, a from test where b=21 and a<70 and c>15 and b>7",
            {"22", "20"}, false);
+  TestUtil("SELECT c, a from test where b=21 and a<70 and c>15 and b>7",
+           {"22", "20"}, false);
+  TestUtil("SELECT c, a from test where b=21 and a<70 and c>15 and b>7",
+           {"22", "20"}, false);
+  TestUtil("SELECT c, a from test where b=21 and a<70 and c>15 and b>7",
+           {"22", "20"}, false);
+  TestUtil("SELECT c, a from test where b=21 and a<70 and c>15 and b>7",
+           {"22", "20"}, false);
 }
 
 TEST_F(SIMDSQLTests, SelectTest3) {
   // Testing predicate
+  TestUtil("SELECT c, a from test where (b-2)*3+5*a=(c-2)*8-3",
+           {"22", "20"}, false);
+  TestUtil("SELECT c, a from test where (b-2)*3+5*a=(c-2)*8-3",
+           {"22", "20"}, false);
+  TestUtil("SELECT c, a from test where (b-2)*3+5*a=(c-2)*8-3",
+           {"22", "20"}, false);
   TestUtil("SELECT c, a from test where (b-2)*3+5*a=(c-2)*8-3",
            {"22", "20"}, false);
   TestUtil("SELECT c, a from test where (b-2)*3+5*a=(c-2)*8-3",
