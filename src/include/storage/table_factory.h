@@ -36,7 +36,7 @@ class TableFactory {
                                  size_t tuples_per_tile_group_count,
                                  bool own_schema, bool adapt_table,
                                  bool is_catalog = false,
-                                 peloton::LayoutType layout_type = peloton::LayoutType::COLUMN);
+                                 peloton::LayoutType layout_type = peloton::LayoutType::ROW);
 
   static TempTable *GetTempTable(catalog::Schema *schema, bool own_schema);
 
