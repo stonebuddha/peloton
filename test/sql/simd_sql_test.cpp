@@ -175,9 +175,9 @@ TEST_F(SIMDSQLTests, SelectTest2) {
 
 TEST_F(SIMDSQLTests, SelectTest3) {
   // Testing predicate
-  TestUtil("SELECT c, a from test where (b-2)*3+5*a=(c-2)*8-3 and b=21",
+  TestUtil("SELECT c, a from test where (b-2)*3+5*a=(c-2)*8-3",
            {"22", "20"}, false);
-  TestUtil("SELECT c, a from test where (b-2)*3+5*a=(c-2)*8-3 and b=21",
+  TestUtil("SELECT c, a from test where (b-2)*3+5*a=(c-2)*8-3",
            {"22", "20"}, false);
 }
 

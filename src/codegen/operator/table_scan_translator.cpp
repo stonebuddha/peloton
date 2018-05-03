@@ -289,19 +289,27 @@ static codegen::Value VectorizedDeriveValue(
     } else {
       llvm::Value *val =
           llvm::UndefValue::get(llvm::VectorType::get(llvm_type, N));
-      llvm::Value *is_null = type.nullable
+      /* llvm::Value *is_null = type.nullable
                                  ? llvm::UndefValue::get(llvm::VectorType::get(
                                        codegen.BoolType(), N))
-                                 : nullptr;
+                                 : nullptr; */
+      llvm::Value *is_null = nullptr;
       for (uint32_t i = 0; i < N; ++i) {
         RowBatch::Row row =
             batch.GetRowAt(codegen->CreateAdd(start, codegen.Const32(i)));
         codegen::Value eval_row = row.DeriveValue(codegen, ai);
         val = codegen->CreateInsertElement(val, eval_row.GetValue(), i);
-        if (type.nullable) {
+        /* if (type.nullable) {
           is_null = codegen->CreateInsertElement(is_null,
                                                  eval_row.IsNull(codegen), i);
-        }
+        } */
+      }
+
+      if (type.nullable) {
+        auto &sql_type = type.GetSqlType();
+        Value tmp_val{sql_type, val};
+        Value null_val{sql_type, codegen->CreateVectorSplat(N, sql_type.GetNullValue(codegen).GetValue())};
+        is_null = tmp_val.CompareEq(codegen, null_val).GetValue();
       }
 
       return Value{type, val, nullptr, is_null};
