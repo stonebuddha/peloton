@@ -456,7 +456,7 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
                                                 VectorizedIterateCallback::
                                                     IterationInstance &ins) {
       auto comp_val = VectorizedDeriveValue(codegen, N, batch, ins.start, true,
-                                            simd_predicate.get());
+                                            simd_predicate.get(), cache);
 
       PELOTON_ASSERT(comp_val.GetType().GetSqlType() ==
                      type::Boolean::Instance());
