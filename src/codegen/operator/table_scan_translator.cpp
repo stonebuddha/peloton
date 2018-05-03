@@ -256,7 +256,7 @@ TableScanTranslator::ScanConsumer::GetNonSIMDPredicate() const {
 static codegen::Value VectorizedDeriveValue(
     CodeGen &codegen, uint64_t N, RowBatch &batch, llvm::Value *start,
     bool filtered, const expression::AbstractExpression *exp,
-    std::unordered_map<const planner::AttributeInfo *, codegen::Value> &cache) {
+    std::unordered_map<const planner::AttributeInfo *, codegen::Value> *cache = nullptr) {
   type::Type type{exp->GetValueType(), exp->IsNullable()};
   llvm::Type *llvm_type, *dummy;
   type.GetSqlType().GetTypeForMaterialization(codegen, llvm_type, dummy);
@@ -264,9 +264,11 @@ static codegen::Value VectorizedDeriveValue(
   if (auto *tve = dynamic_cast<const expression::TupleValueExpression *>(exp)) {
     auto *ai = tve->GetAttributeRef();
 
-    auto cache_iter = cache.find(ai);
-    if (cache_iter != cache.end()) {
-      return cache_iter->second;
+    if (cache != nullptr) {
+      auto cache_iter = cache->find(ai);
+      if (cache_iter != cache->end()) {
+        return cache_iter->second;
+      }
     }
 
     if (!filtered) {
@@ -292,7 +294,7 @@ static codegen::Value VectorizedDeriveValue(
       }
 
       codegen::Value ret{type, val, nullptr, is_null};
-      cache.insert(std::make_pair(ai, ret));
+      cache->insert(std::make_pair(ai, ret));
       return ret;
     } else {
       llvm::Value *val =
@@ -321,7 +323,7 @@ static codegen::Value VectorizedDeriveValue(
       }
 
       codegen::Value ret{type, val, nullptr, is_null};
-      cache.insert(std::make_pair(ai, ret));
+      cache->insert(std::make_pair(ai, ret));
       return ret;
     }
   }
@@ -422,8 +424,6 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
 
   uint32_t N = 32;
 
-  std::unordered_map<const planner::AttributeInfo *, codegen::Value> cache;
-
 #ifdef ORIGINAL_ORDER
   for (auto &simd_predicate : simd_predicates) {
     LOG_INFO("SIMD predicate detected");
@@ -456,7 +456,7 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
                                                 VectorizedIterateCallback::
                                                     IterationInstance &ins) {
       auto comp_val = VectorizedDeriveValue(codegen, N, batch, ins.start, true,
-                                            simd_predicate.get(), cache);
+                                            simd_predicate.get());
 
       PELOTON_ASSERT(comp_val.GetType().GetSqlType() ==
                      type::Boolean::Instance());
@@ -544,6 +544,8 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
     batch.AddAttribute(accessor.GetAttributeRef(), &accessor);
   }
 
+  std::unordered_map<const planner::AttributeInfo *, codegen::Value> cache;
+
   batch.VectorizedIterate(codegen, N, [&](RowBatch::VectorizedIterateCallback::
                                               IterationInstance &ins) {
     llvm::Value *mask = llvm::Constant::getAllOnesValue(
@@ -554,7 +556,7 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
       LOG_INFO("%s", simd_predicate->GetInfo().c_str());
 
       auto comp_val = VectorizedDeriveValue(codegen, N, batch, ins.start, false,
-                                            simd_predicate.get(), cache);
+                                            simd_predicate.get(), &cache);
 
       PELOTON_ASSERT(comp_val.GetType().GetSqlType() ==
                      type::Boolean::Instance());
