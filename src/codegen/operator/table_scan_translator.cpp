@@ -255,13 +255,19 @@ TableScanTranslator::ScanConsumer::GetNonSIMDPredicate() const {
 
 static codegen::Value VectorizedDeriveValue(
     CodeGen &codegen, uint64_t N, RowBatch &batch, llvm::Value *start,
-    bool filtered, const expression::AbstractExpression *exp) {
+    bool filtered, const expression::AbstractExpression *exp,
+    std::unordered_map<const planner::AttributeInfo *, codegen::Value> &cache) {
   type::Type type{exp->GetValueType(), exp->IsNullable()};
   llvm::Type *llvm_type, *dummy;
   type.GetSqlType().GetTypeForMaterialization(codegen, llvm_type, dummy);
 
   if (auto *tve = dynamic_cast<const expression::TupleValueExpression *>(exp)) {
     auto *ai = tve->GetAttributeRef();
+
+    auto cache_iter = cache.find(ai);
+    if (cache_iter != cache.end()) {
+      return cache_iter->second;
+    }
 
     if (!filtered) {
       RowBatch::Row first_row = batch.GetRowAt(start);
@@ -285,7 +291,9 @@ static codegen::Value VectorizedDeriveValue(
         is_null = val_is_null.GetValue();
       }
 
-      return Value{type, val, nullptr, is_null};
+      codegen::Value ret{type, val, nullptr, is_null};
+      cache.insert(std::make_pair(ai, ret));
+      return ret;
     } else {
       llvm::Value *val =
           llvm::UndefValue::get(llvm::VectorType::get(llvm_type, N));
@@ -312,7 +320,9 @@ static codegen::Value VectorizedDeriveValue(
         is_null = tmp_val.CompareEq(codegen, null_val).GetValue();
       }
 
-      return Value{type, val, nullptr, is_null};
+      codegen::Value ret{type, val, nullptr, is_null};
+      cache.insert(std::make_pair(ai, ret));
+      return ret;
     }
   }
 
@@ -333,9 +343,9 @@ static codegen::Value VectorizedDeriveValue(
   if (auto *comp_exp =
           dynamic_cast<const expression::ComparisonExpression *>(exp)) {
     Value lhs_val = VectorizedDeriveValue(codegen, N, batch, start, filtered,
-                                          comp_exp->GetChild(0));
+                                          comp_exp->GetChild(0), cache);
     Value rhs_val = VectorizedDeriveValue(codegen, N, batch, start, filtered,
-                                          comp_exp->GetChild(1));
+                                          comp_exp->GetChild(1), cache);
 
     Value comp_val;
     switch (comp_exp->GetExpressionType()) {
@@ -368,9 +378,9 @@ static codegen::Value VectorizedDeriveValue(
   if (auto *op_exp =
           dynamic_cast<const expression::OperatorExpression *>(exp)) {
     Value lhs_val = VectorizedDeriveValue(codegen, N, batch, start, filtered,
-                                          op_exp->GetChild(0));
+                                          op_exp->GetChild(0), cache);
     Value rhs_val = VectorizedDeriveValue(codegen, N, batch, start, filtered,
-                                          op_exp->GetChild(1));
+                                          op_exp->GetChild(1), cache);
 
     Value op_val;
     switch (op_exp->GetExpressionType()) {
@@ -411,6 +421,8 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
   }
 
   uint32_t N = 32;
+
+  std::unordered_map<const planner::AttributeInfo *, codegen::Value> cache;
 
 #ifdef ORIGINAL_ORDER
   for (auto &simd_predicate : simd_predicates) {
@@ -542,7 +554,7 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
       LOG_INFO("%s", simd_predicate->GetInfo().c_str());
 
       auto comp_val = VectorizedDeriveValue(codegen, N, batch, ins.start, false,
-                                            simd_predicate.get());
+                                            simd_predicate.get(), cache);
 
       PELOTON_ASSERT(comp_val.GetType().GetSqlType() ==
                      type::Boolean::Instance());
