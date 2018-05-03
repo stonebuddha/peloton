@@ -164,6 +164,10 @@ TEST_F(SIMDSQLTests, SimpleSelectTest) {
   TestUtil("SELECT c, a from test where b=21", {"22", "20"}, false);
 }
 
+TEST_F(SIMDSQLTests, SimpleSelectTestF) {
+  TestUtil("SELECT c, a from test where c=22", {"22", "20"}, false);
+}
+
 TEST_F(SIMDSQLTests, SelectTest1) {
   TestUtil("SELECT c, a from test where a<70.0 and b=21", {"22", "20"}, false);
 }
