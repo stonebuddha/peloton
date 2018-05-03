@@ -14,17 +14,17 @@
 
 #include "codegen/lang/if.h"
 #include "codegen/proxy/executor_context_proxy.h"
+#include "codegen/proxy/runtime_functions_proxy.h"
 #include "codegen/proxy/storage_manager_proxy.h"
 #include "codegen/proxy/transaction_runtime_proxy.h"
-#include "codegen/proxy/runtime_functions_proxy.h"
 #include "codegen/proxy/zone_map_proxy.h"
 #include "codegen/type/boolean_type.h"
 #include "codegen/type/type.h"
 #include "expression/comparison_expression.h"
 #include "expression/constant_value_expression.h"
-#include "expression/tuple_value_expression.h"
-#include "expression/parameter_value_expression.h"
 #include "expression/operator_expression.h"
+#include "expression/parameter_value_expression.h"
+#include "expression/tuple_value_expression.h"
 #include "planner/seq_scan_plan.h"
 #include "storage/data_table.h"
 #include "storage/zone_map_manager.h"
@@ -72,7 +72,7 @@ TableScanTranslator::TableScanTranslator(const planner::SeqScanPlan &scan,
     context.Prepare(*non_simd_predicate);
   }
 
-  LOG_DEBUG("Finished constructing TableScanTranslator ...");
+  LOG_TRACE("Finished constructing TableScanTranslator ...");
 }
 
 // Produce!
@@ -145,7 +145,7 @@ TableScanTranslator::ScanConsumer::ScanConsumer(
 void TableScanTranslator::ScanConsumer::ProcessTuples(
     CodeGen &codegen, llvm::Value *tid_start, llvm::Value *tid_end,
     TileGroup::TileGroupAccess &tile_group_access) {
-  // TODO: Should visibility check be done here or in codegen::Table/TileGroup?
+// TODO: Should visibility check be done here or in codegen::Table/TileGroup?
 
 #ifdef ORIGINAL_ORDER
   // 1. Filter the rows in the range [tid_start, tid_end) by txn visibility
@@ -171,8 +171,12 @@ void TableScanTranslator::ScanConsumer::ProcessTuples(
 #endif
 
   // 3. Setup the (filtered) row batch and setup attribute accessors
-  RowBatch batch{translator_.GetCompilationContext(), tile_group_id_, tid_start,
-                 tid_end, selection_vector_, true};
+  RowBatch batch{translator_.GetCompilationContext(),
+                 tile_group_id_,
+                 tid_start,
+                 tid_end,
+                 selection_vector_,
+                 true};
 
   std::vector<TableScanTranslator::AttributeAccess> attribute_accesses;
   SetupRowBatch(batch, tile_group_access, attribute_accesses);
@@ -222,11 +226,13 @@ void TableScanTranslator::ScanConsumer::FilterRowsByVisibility(
   // Invoke TransactionRuntime::PerformRead(...)
   llvm::Value *out_idx =
       codegen.Call(TransactionRuntimeProxy::PerformVectorizedRead,
-                   {txn, tile_group_ptr_, tid_start, tid_end, raw_sel_vec, codegen.Const32(-1)});
+                   {txn, tile_group_ptr_, tid_start, tid_end, raw_sel_vec,
+                    codegen.Const32(-1)});
 #else
   llvm::Value *out_idx =
       codegen.Call(TransactionRuntimeProxy::PerformVectorizedRead,
-                   {txn, tile_group_ptr_, tid_start, tid_end, raw_sel_vec, selection_vector.GetNumElements()});
+                   {txn, tile_group_ptr_, tid_start, tid_end, raw_sel_vec,
+                    selection_vector.GetNumElements()});
 #endif
   selection_vector.SetNumElements(out_idx);
 }
@@ -237,8 +243,8 @@ TableScanTranslator::ScanConsumer::GetPredicate() const {
   return translator_.GetScanPlan().GetPredicate();
 }
 
-const std::vector<std::unique_ptr<expression::AbstractExpression>> &
-TableScanTranslator::ScanConsumer::GetSIMDPredicates() const {
+const std::vector<std::unique_ptr<expression::AbstractExpression>>
+    &TableScanTranslator::ScanConsumer::GetSIMDPredicates() const {
   return translator_.GetScanPlan().GetSIMDPredicates();
 }
 
@@ -248,8 +254,8 @@ TableScanTranslator::ScanConsumer::GetNonSIMDPredicate() const {
 }
 
 static codegen::Value VectorizedDeriveValue(
-    CodeGen &codegen, uint64_t N, RowBatch &batch, llvm::Value *start, bool filtered,
-    const expression::AbstractExpression *exp) {
+    CodeGen &codegen, uint64_t N, RowBatch &batch, llvm::Value *start,
+    bool filtered, const expression::AbstractExpression *exp) {
   type::Type type{exp->GetValueType(), exp->IsNullable()};
   llvm::Type *llvm_type, *dummy;
   type.GetSqlType().GetTypeForMaterialization(codegen, llvm_type, dummy);
@@ -261,31 +267,40 @@ static codegen::Value VectorizedDeriveValue(
       RowBatch::Row first_row = batch.GetRowAt(start);
 
       llvm::Value *ptr = first_row.DeriveFixedLengthPtrInTableScan(codegen, ai);
-      ptr = codegen->CreateBitCast(ptr, llvm::VectorType::get(llvm_type, N)->getPointerTo());
+      ptr = codegen->CreateBitCast(
+          ptr, llvm::VectorType::get(llvm_type, N)->getPointerTo());
 
-      // llvm::Value *val = codegen->CreateMaskedLoad(ptr, 0, llvm::Constant::getAllOnesValue(
+      // llvm::Value *val = codegen->CreateMaskedLoad(ptr, 0,
+      // llvm::Constant::getAllOnesValue(
       //     llvm::VectorType::get(codegen.BoolType(), N)));
       llvm::Value *val = codegen->CreateLoad(ptr);
       llvm::Value *is_null = nullptr;
       if (type.nullable) {
         auto &sql_type = type.GetSqlType();
         Value tmp_val{sql_type, val};
-        Value null_val{sql_type, codegen->CreateVectorSplat(N, sql_type.GetNullValue(codegen).GetValue())};
+        Value null_val{sql_type,
+                       codegen->CreateVectorSplat(
+                           N, sql_type.GetNullValue(codegen).GetValue())};
         auto val_is_null = tmp_val.CompareEq(codegen, null_val);
         is_null = val_is_null.GetValue();
       }
 
       return Value{type, val, nullptr, is_null};
     } else {
-      llvm::Value *val = llvm::UndefValue::get(llvm::VectorType::get(llvm_type, N));
-      llvm::Value *is_null = type.nullable ? llvm::UndefValue::get(llvm::VectorType::get(codegen.BoolType(), N)) : nullptr;
+      llvm::Value *val =
+          llvm::UndefValue::get(llvm::VectorType::get(llvm_type, N));
+      llvm::Value *is_null = type.nullable
+                                 ? llvm::UndefValue::get(llvm::VectorType::get(
+                                       codegen.BoolType(), N))
+                                 : nullptr;
       for (uint32_t i = 0; i < N; ++i) {
         RowBatch::Row row =
             batch.GetRowAt(codegen->CreateAdd(start, codegen.Const32(i)));
         codegen::Value eval_row = row.DeriveValue(codegen, ai);
         val = codegen->CreateInsertElement(val, eval_row.GetValue(), i);
         if (type.nullable) {
-          is_null = codegen->CreateInsertElement(is_null, eval_row.IsNull(codegen), i);
+          is_null = codegen->CreateInsertElement(is_null,
+                                                 eval_row.IsNull(codegen), i);
         }
       }
 
@@ -307,9 +322,12 @@ static codegen::Value VectorizedDeriveValue(
     return Value{type, val, nullptr, is_null};
   }
 
-  if (auto *comp_exp = dynamic_cast<const expression::ComparisonExpression *>(exp)) {
-    Value lhs_val = VectorizedDeriveValue(codegen, N, batch, start, filtered, comp_exp->GetChild(0));
-    Value rhs_val = VectorizedDeriveValue(codegen, N, batch, start, filtered, comp_exp->GetChild(1));
+  if (auto *comp_exp =
+          dynamic_cast<const expression::ComparisonExpression *>(exp)) {
+    Value lhs_val = VectorizedDeriveValue(codegen, N, batch, start, filtered,
+                                          comp_exp->GetChild(0));
+    Value rhs_val = VectorizedDeriveValue(codegen, N, batch, start, filtered,
+                                          comp_exp->GetChild(1));
 
     Value comp_val;
     switch (comp_exp->GetExpressionType()) {
@@ -339,9 +357,12 @@ static codegen::Value VectorizedDeriveValue(
     return comp_val;
   }
 
-  if (auto *op_exp = dynamic_cast<const expression::OperatorExpression *>(exp)) {
-    Value lhs_val = VectorizedDeriveValue(codegen, N, batch, start, filtered, op_exp->GetChild(0));
-    Value rhs_val = VectorizedDeriveValue(codegen, N, batch, start, filtered, op_exp->GetChild(1));
+  if (auto *op_exp =
+          dynamic_cast<const expression::OperatorExpression *>(exp)) {
+    Value lhs_val = VectorizedDeriveValue(codegen, N, batch, start, filtered,
+                                          op_exp->GetChild(0));
+    Value rhs_val = VectorizedDeriveValue(codegen, N, batch, start, filtered,
+                                          op_exp->GetChild(1));
 
     Value op_val;
     switch (op_exp->GetExpressionType()) {
@@ -414,7 +435,8 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
     batch.VectorizedIterate(codegen, N, [&](RowBatch::
                                                 VectorizedIterateCallback::
                                                     IterationInstance &ins) {
-      auto comp_val = VectorizedDeriveValue(codegen, N, batch, ins.start, true, simd_predicate.get());
+      auto comp_val = VectorizedDeriveValue(codegen, N, batch, ins.start, true,
+                                            simd_predicate.get());
 
       PELOTON_ASSERT(comp_val.GetType().GetSqlType() ==
                      type::Boolean::Instance());
@@ -469,7 +491,8 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
       row.SetValidity(codegen, bool_val);
       idx_cur->addIncoming(codegen->CreateAdd(idx_cur, codegen.Const32(1)),
                            codegen->GetInsertBlock());
-      write_pos->addIncoming(tracker.GetFinalOutputPos(), codegen->GetInsertBlock());
+      write_pos->addIncoming(tracker.GetFinalOutputPos(),
+                             codegen->GetInsertBlock());
       codegen->CreateBr(check_post_batch_bb);
     }
 
@@ -501,18 +524,20 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
     batch.AddAttribute(accessor.GetAttributeRef(), &accessor);
   }
 
-  batch.VectorizedIterate(codegen, N, [&](RowBatch::
-                                          VectorizedIterateCallback::
-                                          IterationInstance &ins) {
-    llvm::Value *mask = llvm::Constant::getAllOnesValue(llvm::VectorType::get(codegen.BoolType(), N));
+  batch.VectorizedIterate(codegen, N, [&](RowBatch::VectorizedIterateCallback::
+                                              IterationInstance &ins) {
+    llvm::Value *mask = llvm::Constant::getAllOnesValue(
+        llvm::VectorType::get(codegen.BoolType(), N));
 
     for (auto &simd_predicate : simd_predicates) {
       LOG_INFO("SIMD predicate detected");
       LOG_INFO("%s", simd_predicate->GetInfo().c_str());
 
-      auto comp_val = VectorizedDeriveValue(codegen, N, batch, ins.start, false, simd_predicate.get());
+      auto comp_val = VectorizedDeriveValue(codegen, N, batch, ins.start, false,
+                                            simd_predicate.get());
 
-      PELOTON_ASSERT(comp_val.GetType().GetSqlType() == type::Boolean::Instance());
+      PELOTON_ASSERT(comp_val.GetType().GetSqlType() ==
+                     type::Boolean::Instance());
       auto bool_val = type::Boolean::Instance().Reify(codegen, comp_val);
 
       mask = codegen->CreateAnd(mask, bool_val);
@@ -570,7 +595,8 @@ void TableScanTranslator::ScanConsumer::FilterRowsByPredicate(
     row.SetValidity(codegen, mask);
     idx_cur->addIncoming(codegen->CreateAdd(idx_cur, codegen.Const32(1)),
                          codegen->GetInsertBlock());
-    write_pos->addIncoming(tracker.GetFinalOutputPos(), codegen->GetInsertBlock());
+    write_pos->addIncoming(tracker.GetFinalOutputPos(),
+                           codegen->GetInsertBlock());
     codegen->CreateBr(check_post_batch_bb);
   }
 
@@ -630,8 +656,8 @@ codegen::Value TableScanTranslator::AttributeAccess::Access(
   return raw_row.LoadColumn(codegen, ai_->attribute_id);
 }
 
-llvm::Value *TableScanTranslator::AttributeAccess::GetFixedLengthPtr(peloton::codegen::CodeGen &codegen,
-                                                            peloton::codegen::RowBatch::Row &row) {
+llvm::Value *TableScanTranslator::AttributeAccess::GetFixedLengthPtr(
+    peloton::codegen::CodeGen &codegen, peloton::codegen::RowBatch::Row &row) {
   auto raw_row = tile_group_access_.GetRow(row.GetTID(codegen));
   return raw_row.GetFixedLengthColumnPtr(codegen, ai_->attribute_id);
 }
