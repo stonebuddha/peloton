@@ -68,7 +68,6 @@ class SIMDSQLTests : public PelotonTest {
     uint32_t N = 10000000;
     txn = txn_manager.BeginTransaction();
     auto *catalog = catalog::Catalog::GetInstance();
-    auto test_db = catalog->GetDatabaseWithName(DEFAULT_DB_NAME, txn);
     auto test_table = catalog->GetTableWithName(
         DEFAULT_DB_NAME, DEFUALT_SCHEMA_NAME, "test", txn);
     auto *table_schema = test_table->GetSchema();
