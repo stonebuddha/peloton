@@ -175,6 +175,11 @@ bool TimestampOrderingTransactionManager::PerformRead(
     bool acquire_ownership) {
   ItemPointer location = read_location;
 
+  // Hack to test the read only SIMD execution
+  if (current_txn->GetIsolationLevel() == IsolationLevelType::READ_COMMITTED) {
+    return true;
+  }
+
   //////////////////////////////////////////////////////////
   //// handle READ_ONLY
   //////////////////////////////////////////////////////////
