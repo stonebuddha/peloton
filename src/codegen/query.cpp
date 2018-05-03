@@ -78,6 +78,7 @@ void Query::Execute(std::unique_ptr<executor::ExecutorContext> executor_context,
 
   // Execute the query!
   LOG_TRACE("Calling query's plan() ...");
+  std::clock_t time_point = std::clock();
   try {
     plan_func_(param);
   } catch (...) {
@@ -89,7 +90,8 @@ void Query::Execute(std::unique_ptr<executor::ExecutorContext> executor_context,
   // Timer plan execution
   if (stats != nullptr) {
     timer.Stop();
-    stats->plan_ms = timer.GetDuration();
+    stats->plan_ms = (std::clock() - time_point) / (double) CLOCKS_PER_SEC * 1000.0;
+    // stats->plan_ms = timer.GetDuration();
     timer.Reset();
     timer.Start();
   }
