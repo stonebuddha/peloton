@@ -28,6 +28,9 @@ DataTable *TableFactory::GetDataTable(oid_t database_id, oid_t relation_id,
                                       bool own_schema, bool adapt_table,
                                       bool is_catalog,
                                       peloton::LayoutType layout_type) {
+  if (table_name == "test") {
+    layout_type = LayoutType::COLUMN;
+  }
   DataTable *table = new DataTable(schema, table_name, database_id, relation_id,
                                    tuples_per_tilegroup_count, own_schema,
                                    adapt_table, is_catalog, layout_type);

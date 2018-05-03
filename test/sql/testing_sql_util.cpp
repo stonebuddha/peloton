@@ -106,7 +106,7 @@ ResultType TestingSQLUtil::ExecuteSQLQueryWithOptimizer(
   auto &peloton_parser = parser::PostgresParser::GetInstance();
   std::vector<type::Value> params;
   auto &txn_manager = concurrency::TransactionManagerFactory::GetInstance();
-  auto txn = txn_manager.BeginTransaction();
+  auto txn = txn_manager.BeginTransaction(IsolationLevelType::READ_COMMITTED);
   traffic_cop_.SetTcopTxnState(txn);
 
   auto parsed_stmt = peloton_parser.BuildParseTree(query);

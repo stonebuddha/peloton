@@ -80,7 +80,9 @@ static void CompileAndExecutePlan(
 
   codegen::Query::RuntimeStats stats;
   query->Execute(std::move(executor_context), consumer, on_query_result, &stats);
-  LOG_INFO("Time of query execution: [%lf, %lf, %lf]", stats.init_ms, stats.plan_ms, stats.tear_down_ms);
+  if (txn->GetIsolationLevel() == IsolationLevelType::READ_COMMITTED) {
+    LOG_INFO("Time of query execution: [%lf, %lf, %lf]", stats.init_ms, stats.plan_ms, stats.tear_down_ms);
+  }
 }
 
 static void InterpretPlan(
