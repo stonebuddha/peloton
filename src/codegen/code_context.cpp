@@ -219,7 +219,7 @@ bool CodeContext::Compile() {
 
   // Log the module
   LOG_TRACE("%s\n", GetIR().c_str());
-  DumpContents();
+  // DumpContents();
 
   // All is well
   return true;

@@ -62,7 +62,7 @@ class SIMDSQLTests : public PelotonTest {
 
     // Create a table first
     TestingSQLUtil::ExecuteSQLQuery(
-        "CREATE TABLE test(a INT, b INT, c DECIMAL);");
+        "CREATE TABLE test(a INT, b INT, c DECIMAL, d INT);");
 
     // Insert tuples into table
     uint32_t N = 10000000;
@@ -73,7 +73,11 @@ class SIMDSQLTests : public PelotonTest {
     auto *table_schema = test_table->GetSchema();
 
     auto col_val = [](uint32_t tuple_id, uint32_t col_id) {
-      return 10 * tuple_id + col_id;
+      if (tuple_id == 2 || tuple_id % 1000 == 0) {
+        return 10 * tuple_id + col_id;
+      } else {
+        return 11 * tuple_id + 4 * col_id;
+      }
     };
 
     const bool allocate = true;
@@ -84,6 +88,7 @@ class SIMDSQLTests : public PelotonTest {
       tuple.SetValue(0, type::ValueFactory::GetIntegerValue(col_val(rowid, 0)));
       tuple.SetValue(1, type::ValueFactory::GetIntegerValue(col_val(rowid, 1)));
       tuple.SetValue(2, type::ValueFactory::GetDecimalValue(col_val(rowid, 2)));
+      tuple.SetValue(3, type::ValueFactory::GetIntegerValue(col_val(rowid, 3)));
 
       ItemPointer *index_entry_ptr = nullptr;
       ItemPointer tuple_slot_id =
@@ -185,29 +190,29 @@ TEST_F(SIMDSQLTests, SelectTest1) {
 }
 
 TEST_F(SIMDSQLTests, SelectTest2) {
-  TestUtil("SELECT c, a from test where b=21 and a<70 and c>15 and b>7",
+  TestUtil("SELECT c, a from test where b=21 and a<70 and c>15 and d>7",
            {"22", "20"}, false);
-  TestUtil("SELECT c, a from test where b=21 and a<70 and c>15 and b>7",
+  TestUtil("SELECT c, a from test where b=21 and a<70 and c>15 and d>7",
            {"22", "20"}, false);
-  TestUtil("SELECT c, a from test where b=21 and a<70 and c>15 and b>7",
+  TestUtil("SELECT c, a from test where b=21 and a<70 and c>15 and d>7",
            {"22", "20"}, false);
-  TestUtil("SELECT c, a from test where b=21 and a<70 and c>15 and b>7",
+  TestUtil("SELECT c, a from test where b=21 and a<70 and c>15 and d>7",
            {"22", "20"}, false);
-  TestUtil("SELECT c, a from test where b=21 and a<70 and c>15 and b>7",
+  TestUtil("SELECT c, a from test where b=21 and a<70 and c>15 and d>7",
            {"22", "20"}, false);
 }
 
 TEST_F(SIMDSQLTests, SelectTest3) {
   // Testing predicate
-  TestUtil("SELECT c, a from test where (b-2)*3+5*a=(c-2)*8-3 and b=21",
+  TestUtil("SELECT c, a from test where (b-2)*3+5*a=(c-2)*8-3 and d=23",
            {"22", "20"}, false);
-  TestUtil("SELECT c, a from test where (b-2)*3+5*a=(c-2)*8-3 and b=21",
+  TestUtil("SELECT c, a from test where (b-2)*3+5*a=(c-2)*8-3 and d=23",
            {"22", "20"}, false);
-  TestUtil("SELECT c, a from test where (b-2)*3+5*a=(c-2)*8-3 and b=21",
+  TestUtil("SELECT c, a from test where (b-2)*3+5*a=(c-2)*8-3 and d=23",
            {"22", "20"}, false);
-  TestUtil("SELECT c, a from test where (b-2)*3+5*a=(c-2)*8-3 and b=21",
+  TestUtil("SELECT c, a from test where (b-2)*3+5*a=(c-2)*8-3 and d=23",
            {"22", "20"}, false);
-  TestUtil("SELECT c, a from test where (b-2)*3+5*a=(c-2)*8-3 and b=21",
+  TestUtil("SELECT c, a from test where (b-2)*3+5*a=(c-2)*8-3 and d=23",
            {"22", "20"}, false);
 }
 

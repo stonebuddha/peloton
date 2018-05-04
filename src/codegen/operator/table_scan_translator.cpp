@@ -254,7 +254,7 @@ TableScanTranslator::ScanConsumer::GetNonSIMDPredicate() const {
 }
 
 static codegen::Value VectorizedDeriveValue(
-    CodeGen &codegen, uint64_t N, RowBatch &batch, llvm::Value *start,
+    CodeGen &codegen, uint32_t N, RowBatch &batch, llvm::Value *start,
     bool filtered, const expression::AbstractExpression *exp,
     std::unordered_map<const planner::AttributeInfo *, codegen::Value> *cache = nullptr) {
   type::Type type{exp->GetValueType(), exp->IsNullable()};
